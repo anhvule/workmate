@@ -5,7 +5,7 @@ type: task
 mode: AFK
 status: open
 assignee:
-blocked-by: [002]
+blocked-by: [002, 008]
 ---
 
 ## Question
@@ -25,7 +25,11 @@ Done when all of the following hold:
 - `README.md` stating what workmate is, and `CLAUDE.md` capturing the locked
   decisions and quality bar from the map so future sessions inherit them.
 - Licence file chosen consistently with the attribution findings from
-  [Cowork-z architecture up close](002-cowork-z-architecture.md).
+  [Cowork-z architecture up close](002-cowork-z-architecture.md), including the
+  MIT notice obligation if any cowork-z code is adapted.
+- The sidecar build pipeline matching the decision in
+  [Pin the OpenCode contract and how it ships](008-opencode-contract-and-distribution.md)
+  — a bundled engine needs a per-platform binary matrix from the first commit.
 - Conventional commits, committed to the local repo.
 
 This is scaffolding only — no workmate domain code. The domain model is decided

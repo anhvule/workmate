@@ -37,3 +37,16 @@ Decide:
 - **Privacy.** Local-first is a product promise — state where memory lives and
   confirm nothing about it leaves the machine except inside a model call the user
   initiated.
+
+## Known before starting
+
+[Can OpenCode drive a collaborating agent team?](001-opencode-agent-team.md)
+settled the mechanism: `POST /session/{id}/message` accepts a per-turn
+`system?: string` appended to the system prompt for that turn only — no plugin, no
+restart, no experimental flag — and the injected text is persisted on the user
+message, so what memory said is auditable after the fact. The store, the retrieval
+policy and the per-turn selection are entirely workmate's; OpenCode has no memory
+concept and binds a session to one project by construction.
+
+Retention of the transcripts memory is extracted *from* is decided in
+[Who owns the conversation](010-conversation-source-of-truth.md).

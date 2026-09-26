@@ -37,3 +37,24 @@ Decide:
 
 Depends on the workspace/repo relationship settled in
 [Workmate's domain model](003-domain-model.md).
+
+## Known before starting
+
+From [Can OpenCode drive a collaborating agent team?](001-opencode-agent-team.md):
+OpenCode's git awareness is read-level only — `GET /vcs` returns `{ branch }`,
+sessions expose diff summaries and snapshot revert. Branching, staging and commits
+go through the `bash` tool, but `permission.bash` takes last-match-wins glob rules
+and every request surfaces as an event with an explicit `once`/`always`/`reject`
+reply, so workmate can gate git precisely — it just has to implement it.
+
+Both research tickets converge on the **isolation** bullet from opposite
+directions: OpenCode's worktree isolation is `experimental_`-prefixed, so workmate
+should create git worktrees itself and pass each session a different `?directory=`,
+which is the stable API. That makes "a role works in its own worktree" the cheap
+option rather than the expensive one.
+
+From [Cowork-z architecture up close](002-cowork-z-architecture.md): cowork-z's
+`Input/Output/Misc/Artefacts` convention is prompt-enforced and its own code
+concedes bash bypasses the edit rules — so it is advisory governance over a source
+tree. Deriving the write surface from git state instead is the divergence this
+ticket exists to specify.

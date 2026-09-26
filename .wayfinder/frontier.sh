@@ -4,7 +4,7 @@ set -uo pipefail
 cd "$(dirname "$0")/tickets"
 
 field() { sed -n "s/^$2: *//p" "$1" | head -1; }
-status_of() { sed -n 's/^status: *//p' "$(printf '%03d' "$1")"-*.md 2>/dev/null | head -1; }
+status_of() { sed -n "s/^status: *//p" "$(printf '%03d' "$((10#$1))")"-*.md 2>/dev/null | head -1; }
 
 for f in *.md; do
   [ -e "$f" ] || continue

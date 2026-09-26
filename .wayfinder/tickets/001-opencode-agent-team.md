@@ -3,8 +3,8 @@ id: 001
 title: Can OpenCode drive a collaborating agent team?
 type: research
 mode: AFK
-status: open
-assignee:
+status: closed
+assignee: jack.le@zuhlke.com
 blocked-by: []
 ---
 
@@ -44,3 +44,62 @@ Specifically:
 Answer with a verdict: **which of the three differentiators OpenCode supports
 natively, which workmate must build in the sidecar above it, and which are
 blocked** — plus the citations to back each.
+
+## Resolution
+
+**Nothing is blocked.** All three differentiators are sidecar layers built on
+primitives OpenCode already exposes on a versioned, OpenAPI-generated contract
+under MIT. Full findings, with citations:
+[.wayfinder/research/opencode-agent-team.md](../research/opencode-agent-team.md).
+
+**What is native.** Named agents carrying their own system prompt, model and tool
+allowlist (`Agent`/`AgentConfig`). Many concurrent sessions in one process,
+serialised only per session. Parent/child session trees with a structured
+delegation part and a `task` tool that returns a child's result and can resume it
+by id.
+
+**What workmate must build.** The collaboration itself. Handoff carries exactly
+one string — the child's last text part — never the originating session's context;
+there is no peer-to-peer handoff, only parent→child, capped at `subagent_depth`
+default 1. A planner→builder→reviewer round trip where each role sees what the
+last one decided is workmate reading `GET /session/{id}/message` and composing the
+next session's prompt parts itself.
+
+**The memory hook is better than hoped.** `POST /session/{id}/message` takes a
+per-turn `system?: string` that the request builder appends to the system prompt
+for that turn only — no plugin, no restart, no experimental flag — and the
+injected text is persisted on the user message, so memory stays auditable.
+OpenCode has no memory *store*: `Config.instructions` is static file globs, and
+`Session.projectID`/`Project.worktree` bind a session to one project by
+construction. Store, retrieval policy and per-turn selection are all workmate's.
+
+**Git is read-level only.** `GET /vcs` returns `{ branch }` and nothing more.
+Sessions expose diff summaries, `GET /session/{id}/diff`, a `session.diff` event
+and snapshot revert/unrevert. Branching, staging and commits happen through the
+`bash` tool — so workmate gets them free at the agent level and gets no structured
+control. The control it needs is adjacent: `permission.bash` takes last-match-wins
+glob rules, and every request surfaces as `permission.updated` with an explicit
+`once`/`always`/`reject` reply.
+
+**Distribution is an opportunity.** OpenCode ships prebuilt per-platform binaries
+under MIT, suitable for Tauri sidecar bundling. Cowork-z requires the user to
+`npm i -g opencode-ai` first; workmate need not. See
+[Pin the OpenCode contract and how it ships](008-opencode-contract-and-distribution.md).
+
+**Two churn risks, not capability risks.**
+
+1. *Session-level permissions are mid-migration.* The prompt body's `tools` field
+   is deprecated in favour of permissions on the session, the runtime already
+   reads `session.permission`, but the published `SessionUpdateData.body` still
+   accepts only `{ title? }`. Pin a version and re-check before building on either
+   side of it.
+2. *Worktree isolation is `experimental_`-prefixed.* Prefer workmate-managed git
+   worktrees passed as the stable `?directory=` query param over the experimental
+   workspace adapter. This is the same conclusion the concurrency question reaches
+   from the other direction — see
+   [What "repo-native" actually means](007-repo-native-surface.md).
+
+**Caveat on sourcing.** `sst/opencode` still serves content, but its own README
+badges and Homebrew tap point at `anomalyco/opencode`. The canonical repo appears
+to have moved orgs; citations use `sst` URLs, which currently resolve. Pinning
+should target `anomalyco`.

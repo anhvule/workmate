@@ -33,7 +33,7 @@ implementation ticket for a question that hasn't been decided.
 |---|---|
 | Shape | Tauri 2 desktop, same as cowork-z — Rust shell, native installer |
 | UI | React 19 + TypeScript + Tailwind + Radix/shadcn |
-| Agent engine | OpenCode via Node sidecar, same as cowork-z. Differentiators are a layer **above** the engine |
+| Agent engine | OpenCode via Node sidecar, same as cowork-z. Differentiators are a layer **above** the engine — confirmed viable, nothing blocked |
 | Differentiators | collaborating agent team · persistent cross-workspace memory · repo-native git workflow |
 | v1 parity | workspaces + permissions + credentials · MCP · cron automations · starter packs + skills catalog |
 | Git | local repo, no remote yet; conventional commits |
@@ -47,6 +47,10 @@ green before every commit.
 trade away — breadth of exploration is. Prefer one targeted read over a survey;
 prefer resolving a ticket to re-deriving context another ticket already holds.
 
+**Prior-art findings live in `.wayfinder/research/`** — two long, citation-dense
+documents on OpenCode's integration surface and cowork-z's internals. Do not
+re-derive what they already answer; zoom into them from the resolved tickets.
+
 **Skills every session should consult:** `superpowers:brainstorming` before
 creative work · `superpowers:test-driven-development` · `grilling` and
 `domain-modeling` for decision tickets · `prototype` for prototype tickets ·
@@ -56,12 +60,24 @@ creative work · `superpowers:test-driven-development` · `grilling` and
 
 <!-- one line per closed ticket: gist + link. Detail lives in the ticket. -->
 
-_none yet_
+- [Can OpenCode drive a collaborating agent team?](tickets/001-opencode-agent-team.md)
+  — nothing is blocked; all three differentiators are sidecar layers over native
+  primitives. Named agents with own prompt/model/tools and concurrent sessions are
+  native; handoff carries only one string, so the collaboration itself is
+  workmate's. Per-turn `system` injection is the memory hook, and it is auditable.
+  Git is read-level only, but `permission.bash` glob rules make it gateable.
+  OpenCode is MIT with prebuilt binaries — bundling is possible.
+- [Cowork-z architecture up close](tickets/002-cowork-z-architecture.md) — MIT,
+  reusable with notice in repo and bundle; eight named divergences where copying it
+  would obstruct workmate, chiefly one-session-at-a-time, no agent-role entity,
+  everything cascading off `workspace_id`, and prompt-enforced folder governance.
+  Seven hard-won details worth adopting outright.
 
 ## Not yet specified
 
-- **Provider credentials UX** — how 12+ providers are added, stored in the OS
-  Keychain, and selected per workspace or per agent role.
+- **Provider credentials UX** — how 12+ providers are added and presented, and
+  what a user does when a model they picked has no key. The *scoping* half of this
+  has graduated to [How credentials are scoped](tickets/009-credential-scoping.md).
 - **Cron automations** — scheduling surface, how unattended runs are supervised,
   and where findings surface (notifications? an inbox?).
 - **Starter packs and skills catalog** — what ships in the box, the install
