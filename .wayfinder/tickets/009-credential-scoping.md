@@ -3,8 +3,8 @@ id: 009
 title: How credentials are scoped
 type: grilling
 mode: HITL
-status: open
-assignee:
+status: closed
+assignee: agent (autonomous mode)
 blocked-by: [003]
 ---
 
@@ -41,3 +41,31 @@ Decide, before any credential code is written:
   what a scoped key does to the fingerprint's identity.
 
 Surfaced by [Cowork-z architecture up close](002-cowork-z-architecture.md) §7.
+
+## Resolution
+
+> **Agent-made decision.** Taken autonomously at the user's instruction.
+
+**Keychain account format: `v1:<scope>:<provider>`.** Scope is one of `global`,
+`workspace:<id>` or `role:<id>`. The `v1:` prefix is not decoration — it is the
+thing that makes a future change survivable, since rewriting keychain entries
+without a way to find them is the trap this ticket exists to avoid. A
+`credential_key_version` row in app settings records the current format.
+
+**Credential and model are separate fields.** A role selects a model; credential
+resolution is independent. Cowork-z's coupled `active_provider_id` +
+`selected_model_id` cannot express "cheap model for the researcher, expensive one
+for the reviewer" on the same key — which is the agent-team differentiator's most
+basic requirement.
+
+**Resolution order: role → workspace → global**, most specific wins.
+
+**A missing credential pauses, it does not fail.** The role shows blocked with an
+inline add-key action and the run waits. Failing a multi-role run because the
+third role has no key would discard the first two roles' work.
+
+**The fingerprint bridge is adopted wholesale.** Real keys never reach the webview;
+payloads carry only a fingerprint, and keys move solely through a dedicated
+request/response at engine-spawn time. With scoped keys the fingerprint is
+computed over the *resolved set for the run*, so a scope change correctly
+invalidates it.

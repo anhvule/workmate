@@ -22,6 +22,11 @@ in your repo.*
 point: [kevinlin/cowork-z](https://github.com/kevinlin/cowork-z) — workmate is a
 similar app, not a fork.
 
+**Autonomous mode.** The user instructed the agent to decide and build without
+being asked. Tickets originally typed HITL were resolved by the agent; each such
+resolution is headed *Agent-made decision* and is cheap to overturn. Treat them as
+defaults with rationale, not as ratified product decisions.
+
 **This map carries execution.** Wayfinder's plan-only default is overridden for
 this effort: the destination is a built app, so implementation tickets are
 in-scope alongside decision tickets. Decisions still come first — do not open an
@@ -73,6 +78,32 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   everything cascading off `workspace_id`, and prompt-enforced folder governance.
   Seven hard-won details worth adopting outright.
 
+- [Pin the OpenCode contract and how it ships](tickets/008-opencode-contract-and-distribution.md)
+  — bundle `opencode-ai@1.18.32` as a Tauri sidecar from per-platform prebuilt
+  binaries, so workmate works on first launch where cowork-z needs a global
+  install. Engine moves only when workmate ships; generated client types committed
+  and diffed in CI.
+- [Workmate's domain model](tickets/003-domain-model.md) — Run owns its Sessions
+  (killing the stale-session cull), Role is first-class data, Team replaces Arena,
+  and Memory is associated with workspaces rather than owned by them so nothing
+  cascades into it.
+- [What the agent team looks and feels like](tickets/005-agent-team-ux.md) — one
+  attributed thread with handoff as an expandable card, not lanes; a one-role team
+  must read as a plain chat.
+- [How workmate remembers](tickets/006-persistent-memory.md) — explicit `remember`
+  tool, no silent extraction; bounded pinned digest injected per turn plus a
+  `recall` tool; SQLite canonical, markdown export read-only.
+- [What "repo-native" actually means](tickets/007-repo-native-surface.md) — a run
+  works in its own git worktree on `workmate/run-<id>`, never the user's checkout;
+  permission surface derived from git, the four-folder convention dropped; `git2`
+  in-process.
+- [How credentials are scoped](tickets/009-credential-scoping.md) — keychain
+  account `v1:<scope>:<provider>`, credential separate from model choice,
+  role → workspace → global resolution, missing key pauses the run.
+- [Who owns the conversation](tickets/010-conversation-source-of-truth.md) —
+  OpenCode owns transcripts, workmate stores only an index, Rust is the sole
+  writer, ordering follows the handoff graph.
+
 ## Not yet specified
 
 - **Provider credentials UX** — how 12+ providers are added and presented, and
@@ -85,7 +116,8 @@ creative work · `superpowers:test-driven-development` · `grilling` and
 - **MCP configuration surface** — how servers are registered, scoped to
   workspaces, and permission-gated.
 - **Packaging and release** — signing, notarization, update channel, installer.
-- **Cross-platform** — Windows and Linux builds beyond macOS.
+- **Cross-platform** — Windows and Linux builds beyond macOS. Now narrower: the
+  sidecar binary matrix is decided, so this is packaging and CI only.
 - **First-run onboarding** — what a brand-new user sees before any workspace exists.
 - **Telemetry and error reporting** — or a deliberate decision to ship without any.
 
@@ -94,3 +126,6 @@ creative work · `superpowers:test-driven-development` · `grilling` and
 - **Team-shared workspaces and any sync backend.** Workmate stays single-user and
   local-first; considered as a differentiator during charting and not chosen.
 - **Mobile and browser builds.** The destination is a desktop app.
+- **Pull requests and CI status.** v1 stops at local git; GitHub as a hosting
+  integration is past the destination. Ruled out while resolving
+  [What "repo-native" actually means](tickets/007-repo-native-surface.md).

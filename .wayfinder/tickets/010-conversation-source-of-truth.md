@@ -3,8 +3,8 @@ id: 010
 title: Who owns the conversation
 type: grilling
 mode: HITL
-status: open
-assignee:
+status: closed
+assignee: agent (autonomous mode)
 blocked-by: [003]
 ---
 
@@ -40,3 +40,31 @@ Decide:
   different app version.
 
 Surfaced by [Cowork-z architecture up close](002-cowork-z-architecture.md) §4.
+
+## Resolution
+
+> **Agent-made decision.** Taken autonomously at the user's instruction.
+
+**OpenCode's session store is authoritative for transcripts. Workmate stores an
+index, never a copy.** The index holds session id, run, role, directory and engine
+version, plus derived per-run summaries. Cowork-z's double-persist is merely
+redundant with one agent and becomes an ordering problem with a team.
+
+**Rust is the only writer.** The webview never persists. Cowork-z had to move
+completion handling into Rust because WKWebView throttles backgrounded listeners —
+that scar is evidence, not preference. Optimistic UI updates are local component
+state, discarded when the authoritative event arrives.
+
+**Ordering across a run is the handoff graph first, wall-clock second.** Within a
+session, wall-clock. This is deliberately the same object
+[What the agent team looks and feels like](005-agent-team-ux.md) renders, so the
+stored order and the read order cannot drift.
+
+**Retention.** Transcripts live as long as OpenCode keeps them. Workmate's index
+and its memories survive independently — deleting a workspace deletes index rows
+and never memories, per [Workmate's domain model](003-domain-model.md).
+
+**Reconciliation.** On resume, workmate compares the recorded engine version and
+checks the session still exists. A missing session marks its run archived and
+read-only with the index retained, rather than deleting the user's history or
+pretending the session is live.
