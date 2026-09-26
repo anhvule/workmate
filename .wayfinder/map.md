@@ -104,22 +104,22 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   OpenCode owns transcripts, workmate stores only an index, Rust is the sole
   writer, ordering follows the handoff graph.
 
+- [Scaffold the workmate repo](tickets/004-scaffold-the-repo.md) — pnpm workspace,
+  Tauri 2 + React 19 + Tailwind 4, one `pnpm gate` behind a pre-commit hook, the
+  pinned engine fetched into the bundle, MIT licence and NOTICE. Builds, launches,
+  31 tests green.
+
 ## Not yet specified
 
 - **Provider credentials UX** — how 12+ providers are added and presented, and
   what a user does when a model they picked has no key. The *scoping* half of this
   has graduated to [How credentials are scoped](tickets/009-credential-scoping.md).
-- **Cron automations** — scheduling surface, how unattended runs are supervised,
-  and where findings surface (notifications? an inbox?).
-- **Starter packs and skills catalog** — what ships in the box, the install
-  mechanism, and whether skills are shared with the memory layer.
-- **MCP configuration surface** — how servers are registered, scoped to
-  workspaces, and permission-gated.
-- **Packaging and release** — signing, notarization, update channel, installer.
-- **Cross-platform** — Windows and Linux builds beyond macOS. Now narrower: the
-  sidecar binary matrix is decided, so this is packaging and CI only.
-- **First-run onboarding** — what a brand-new user sees before any workspace exists.
 - **Telemetry and error reporting** — or a deliberate decision to ship without any.
+- **Cross-platform** — Windows and Linux. The binary matrix is decided, so what
+  remains is CI runners and platform-specific keychain and path handling.
+
+<!-- Cron automations, starter packs, MCP config, packaging and first-run all
+     graduated into tickets 018-022 once the domain model fixed their vocabulary. -->
 
 ## Out of scope
 
