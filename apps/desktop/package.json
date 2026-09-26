@@ -1,0 +1,30 @@
+{
+  "name": "@workmate/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "vite:dev": "vite",
+    "vite:build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "gate": "pnpm run typecheck"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@workmate/core": "workspace:*",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4",
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5",
+    "tailwindcss": "^4",
+    "typescript": "^5.7",
+    "vite": "^7"
+  }
+}

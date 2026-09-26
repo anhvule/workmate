@@ -4,7 +4,7 @@ title: Scaffold the workmate repo
 type: task
 mode: AFK
 status: open
-assignee:
+assignee: agent (autonomous mode)
 blocked-by: [002, 008]
 ---
 

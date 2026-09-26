@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ground: oklch(0.99 0 0);
+  --color-ink: oklch(0.24 0.01 260);
+  --color-muted: oklch(0.54 0.01 260);
+  --color-edge: oklch(0.92 0.005 260);
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-ground: oklch(0.19 0.01 260);
+    --color-ink: oklch(0.95 0.005 260);
+    --color-muted: oklch(0.68 0.01 260);
+    --color-edge: oklch(0.29 0.01 260);
+  }
+}

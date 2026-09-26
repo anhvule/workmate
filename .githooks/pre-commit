@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Workmate's gate. Nothing lands red.
+set -euo pipefail
+echo "running pnpm gate…"
+pnpm gate

@@ -1,0 +1,4 @@
+# The pinned OpenCode binary is fetched at build time by scripts/fetch-sidecar-binary.mjs.
+# It is a build artefact of a pinned upstream release, not source — never commit it.
+*
+!.gitignore

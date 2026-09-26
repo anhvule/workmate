@@ -1,0 +1,21 @@
+# Third-party notices
+
+## OpenCode
+
+workmate bundles the OpenCode binary (`opencode-ai`, MIT) as its agent engine.
+The binary is fetched at build time from npm at the version pinned in
+`scripts/fetch-sidecar-binary.mjs` and is redistributed unmodified in the
+application bundle. OpenCode is licensed under the MIT License; see
+<https://github.com/anomalyco/opencode>.
+
+## cowork-z
+
+workmate is a separate application, not a fork of cowork-z
+(<https://github.com/kevinlin/cowork-z>, MIT). No cowork-z source is included
+here. Several of workmate's design choices were informed by reading it — notably
+the api-key fingerprint bridge that keeps secrets out of the webview, readiness
+by the engine's own `ready` event rather than process spawn, and shutdown on
+`ExitRequested` so the engine is not orphaned. Acknowledged with thanks.
+
+If cowork-z source is ever adapted into this repository, its copyright notice
+and MIT permission notice must be reproduced here and shipped in the app bundle.

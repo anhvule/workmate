@@ -1,0 +1,23 @@
+[package]
+name = "workmate"
+version = "0.0.0"
+description = "A local-first AI workspace: a dev team that remembers your projects and lives in your repo."
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+
+[lib]
+name = "workmate_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

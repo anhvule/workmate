@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "workmate",
+  "version": "0.0.0",
+  "identifier": "dev.workmate.app",
+  "build": {
+    "beforeDevCommand": "pnpm run vite:dev",
+    "beforeBuildCommand": "pnpm run vite:build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "workmate",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 720,
+        "minHeight": 520
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "dmg",
+      "app"
+    ],
+    "resources": [
+      "binaries/*"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "A dev team that remembers your projects and lives in your repo.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

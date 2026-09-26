@@ -1,0 +1,26 @@
+{
+  "name": "workmate",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A local-first AI workspace: a dev team that remembers your projects and lives in your repo.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "gate": "node scripts/gate.mjs",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "dev": "pnpm --filter @workmate/desktop dev",
+    "sidecar:fetch": "node scripts/fetch-sidecar-binary.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "eslint": "^9",
+    "typescript": "^5.7",
+    "typescript-eslint": "^8",
+    "vitest": "^3"
+  }
+}
