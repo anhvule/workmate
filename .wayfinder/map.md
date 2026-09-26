@@ -38,7 +38,7 @@ implementation ticket for a question that hasn't been decided.
 |---|---|
 | Shape | Tauri 2 desktop, same as cowork-z — Rust shell, native installer |
 | UI | React 19 + TypeScript + Tailwind + Radix/shadcn |
-| Agent engine | OpenCode via Node sidecar, same as cowork-z. Differentiators are a layer **above** the engine — confirmed viable, nothing blocked |
+| Agent engine | OpenCode, **bundled** as a binary and supervised by Rust. Orchestration runs in a **bundled Node sidecar**; Rust is the only writer of SQLite. Revised while building — see [Where orchestration runs](tickets/024-where-orchestration-runs.md) |
 | Differentiators | collaborating agent team · persistent cross-workspace memory · repo-native git workflow |
 | v1 parity | workspaces + permissions + credentials · MCP · cron automations · starter packs + skills catalog |
 | Git | local repo, no remote yet; conventional commits |
@@ -119,6 +119,12 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   restarts deferred while sessions live; generated client types committed and
   drift checked in the gate. Confirmed `POST /session` takes a `permission` field,
   softening the mid-migration risk.
+
+- [Where orchestration runs](tickets/024-where-orchestration-runs.md) — revises a
+  locked decision: a bundled Node sidecar owns orchestration and the engine
+  connection, Rust stays the sole writer of SQLite behind a narrow IPC, the
+  webview persists nothing. Keeps the TypeScript domain logic as the single
+  implementation of the differentiators.
 
 ## Not yet specified
 
