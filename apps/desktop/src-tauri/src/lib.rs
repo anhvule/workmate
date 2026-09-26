@@ -6,6 +6,9 @@
 //! takes that as a constraint from the first commit rather than a later fix
 //! (ticket 010).
 
+pub mod db;
+pub mod migrations;
+
 use serde::Serialize;
 
 /// The `OpenCode` version workmate is pinned to.
@@ -44,11 +47,29 @@ fn sidecar_present(app: &tauri::AppHandle) -> bool {
         .is_ok_and(|p| p.exists())
 }
 
+/// The schema version this build expects, surfaced for diagnostics.
+// Tauri generates the command shim from this signature and requires an owned
+// `State`, so the value cannot be taken by reference here.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn schema_version(db: tauri::State<'_, db::Db>) -> Result<i64, String> {
+    db.schema_version().map_err(|e| e.to_string())
+}
+
 /// # Panics
-/// Panics if the Tauri runtime cannot start, which is not recoverable.
+/// Panics if the Tauri runtime cannot start, or if the database cannot be
+/// opened or migrated — neither is recoverable, and continuing without
+/// persistence would silently lose the user's work.
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_info])
+        .setup(|app| {
+            use tauri::Manager as _;
+            let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            app.manage(db::Db::open(&dir.join("workmate.sqlite3"))?);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![engine_info, schema_version])
         .run(tauri::generate_context!())
         .expect("error while running workmate");
 }

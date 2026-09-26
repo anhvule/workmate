@@ -109,6 +109,11 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   pinned engine fetched into the bundle, MIT licence and NOTICE. Builds, launches,
   31 tests green.
 
+- [Persistence layer and migration v1](tickets/011-persistence-layer.md) —
+  SQLite schema v1 with WAL, enforced foreign keys and a transactional migration
+  ladder. Memory has no `workspace_id`: deleting a workspace detaches it, proved
+  by test.
+
 ## Not yet specified
 
 - **Provider credentials UX** — how 12+ providers are added and presented, and
