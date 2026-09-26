@@ -16,11 +16,27 @@ const TAURI = join(ROOT, "apps/desktop/src-tauri");
 const cargo = join(process.env.HOME ?? "", ".cargo/bin/cargo");
 const hasCargo = existsSync(cargo) || spawnSync("cargo", ["--version"]).status === 0;
 
+const ENGINE = join(ROOT, "apps/desktop/src-tauri/binaries/opencode");
+
 const steps = [
   ["typecheck", "pnpm", ["-r", "run", "typecheck"], ROOT],
   ["lint", "pnpm", ["exec", "eslint", "."], ROOT],
   ["test", "pnpm", ["exec", "vitest", "run"], ROOT],
 ];
+
+// Contract drift: regenerating the client types from the pinned engine must be
+// a no-op. Skipped when the engine has not been fetched, since it needs the
+// real binary to serve its own OpenAPI document.
+if (existsSync(ENGINE)) {
+  steps.push([
+    "opencode contract",
+    "node",
+    [join(ROOT, "scripts/generate-opencode-types.mjs"), "--check"],
+    ROOT,
+  ]);
+} else {
+  console.warn("! engine binary absent — skipping the contract check. Run `pnpm sidecar:fetch`.");
+}
 
 if (hasCargo) {
   steps.push(

@@ -14,7 +14,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "dev": "pnpm --filter @workmate/desktop dev",
-    "sidecar:fetch": "node scripts/fetch-sidecar-binary.mjs"
+    "sidecar:fetch": "node scripts/fetch-sidecar-binary.mjs",
+    "opencode:types": "node scripts/generate-opencode-types.mjs",
+    "opencode:types:check": "node scripts/generate-opencode-types.mjs --check"
   },
   "devDependencies": {
     "@eslint/js": "^9",

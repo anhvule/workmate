@@ -7,6 +7,7 @@
 //! (ticket 010).
 
 pub mod db;
+pub mod engine;
 pub mod migrations;
 
 use serde::Serialize;
@@ -67,9 +68,20 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             app.manage(db::Db::open(&dir.join("workmate.sqlite3"))?);
+            app.manage(engine::EngineState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![engine_info, schema_version])
+        .on_window_event(|window, event| {
+            // `ExitRequested`, never `Exit`: by the time `Exit` fires the
+            // runtime is tearing down and the engine is left orphaned.
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                use tauri::Manager as _;
+                if let Some(state) = window.app_handle().try_state::<engine::EngineState>() {
+                    let _ = state.shutdown();
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running workmate");
 }

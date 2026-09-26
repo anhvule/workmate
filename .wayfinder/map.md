@@ -114,6 +114,12 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   ladder. Memory has no `workspace_id`: deleting a workspace detaches it, proved
   by test.
 
+- [OpenCode engine client and sidecar supervision](tickets/012-engine-client.md) —
+  bundled engine spawned with a per-launch password, readiness by announced URL,
+  restarts deferred while sessions live; generated client types committed and
+  drift checked in the gate. Confirmed `POST /session` takes a `permission` field,
+  softening the mid-migration risk.
+
 ## Not yet specified
 
 - **Provider credentials UX** — how 12+ providers are added and presented, and
