@@ -4,7 +4,7 @@ title: Workspaces and the permission surface
 type: task
 mode: AFK
 status: open
-assignee:
+assignee: jale
 blocked-by: [011]
 ---
 
