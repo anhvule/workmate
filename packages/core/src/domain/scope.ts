@@ -34,8 +34,10 @@ export const scopeKey = (s: Scope): string => {
 /**
  * The scopes to consult for a run, narrowest first.
  *
- * This is the "role -> workspace -> global" order fixed in ticket 009, and the
- * same walk serves memory resolution in ticket 006.
+ * This is the "role -> workspace -> global" order fixed in ticket 009. Only
+ * memory resolves through it here: credentials resolve in Rust, which owns the
+ * keychain outright, and a second implementation of that format in TypeScript
+ * would be a drift waiting to happen (ticket 017).
  */
 export const resolutionOrder = (opts: {
   role?: RoleId | undefined;

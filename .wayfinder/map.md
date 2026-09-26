@@ -126,6 +126,15 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   webview persists nothing. Keeps the TypeScript domain logic as the single
   implementation of the differentiators.
 
+- [Credentials in the OS Keychain](tickets/017-credentials-keychain.md) —
+  `v1:<scope>:<provider>` accounts resolved role → workspace → global in Rust,
+  which owns the keychain outright; a miss pauses the run and reports what it
+  tried. The TypeScript credential module was deleted rather than left to drift.
+- [Bundle and supervise the Node sidecar](tickets/025-bundle-the-sidecar.md) —
+  orchestration compiled to a binary with Bun (pkg rejected: it builds V8 from
+  source). Rust starts engine-then-sidecar and stops sidecar-then-engine, with
+  readiness by handshake at both hops.
+
 ## Not yet specified
 
 - **Provider credentials UX** — how 12+ providers are added and presented, and

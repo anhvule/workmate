@@ -6,9 +6,12 @@
 //! takes that as a constraint from the first commit rather than a later fix
 //! (ticket 010).
 
+pub mod credentials;
 pub mod db;
 pub mod engine;
 pub mod migrations;
+pub mod runtime;
+pub mod sidecar;
 
 use serde::Serialize;
 
@@ -48,6 +51,21 @@ fn sidecar_present(app: &tauri::AppHandle) -> bool {
         .is_ok_and(|p| p.exists())
 }
 
+/// Start the engine and sidecar, returning the engine's base URL.
+///
+/// The launch password is deliberately **not** returned: it crosses to the
+/// sidecar and no further, the same discipline as the api-key bridge.
+// Tauri generates the command shim from this signature and requires owned
+// `State`, so these cannot be taken by reference here.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn start_runtime(
+    rt: tauri::State<'_, runtime::Runtime>,
+    binaries: tauri::State<'_, runtime::Binaries>,
+) -> Result<String, String> {
+    rt.start(&binaries).map(|a| a.base_url).map_err(|e| e.to_string())
+}
+
 /// The schema version this build expects, surfaced for diagnostics.
 // Tauri generates the command shim from this signature and requires an owned
 // `State`, so the value cannot be taken by reference here.
@@ -69,16 +87,20 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             app.manage(db::Db::open(&dir.join("workmate.sqlite3"))?);
             app.manage(engine::EngineState::default());
+            app.manage(runtime::Runtime::default());
+            app.manage(runtime::Binaries::in_dir(
+                &app.path().resolve("binaries", tauri::path::BaseDirectory::Resource)?,
+            ));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![engine_info, schema_version])
+        .invoke_handler(tauri::generate_handler![engine_info, schema_version, start_runtime])
         .on_window_event(|window, event| {
             // `ExitRequested`, never `Exit`: by the time `Exit` fires the
             // runtime is tearing down and the engine is left orphaned.
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 use tauri::Manager as _;
-                if let Some(state) = window.app_handle().try_state::<engine::EngineState>() {
-                    let _ = state.shutdown();
+                if let Some(rt) = window.app_handle().try_state::<runtime::Runtime>() {
+                    let _ = rt.shutdown();
                 }
             }
         })

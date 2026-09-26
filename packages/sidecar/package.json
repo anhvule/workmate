@@ -9,5 +9,8 @@
     "typecheck": "tsc --noEmit",
     "gate": "pnpm run typecheck"
   },
-  "dependencies": { "@workmate/core": "workspace:*" }
+  "dependencies": {
+    "@workmate/core": "workspace:*",
+    "@workmate/opencode-client": "workspace:*"
+  }
 }
