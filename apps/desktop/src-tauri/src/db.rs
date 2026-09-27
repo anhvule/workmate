@@ -12,6 +12,26 @@ use rusqlite::Connection;
 
 use crate::migrations;
 
+/// The clock durable rows are stamped with: Unix milliseconds.
+///
+/// Milliseconds rather than seconds because two handoffs inside one second are
+/// ordinary, and the handoff graph is ordered by time (ticket 010).
+#[must_use]
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
+/// A path as a storable string, or `None` if it is not UTF-8.
+///
+/// Columns are text, and a lossy conversion would bind a row to a directory
+/// that does not exist — so a path that cannot round-trip is refused instead.
+#[must_use]
+pub fn path_text(p: &Path) -> Option<&str> {
+    p.to_str()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
     #[error("database: {0}")]

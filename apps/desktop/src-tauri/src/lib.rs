@@ -9,9 +9,14 @@
 pub mod credentials;
 pub mod db;
 pub mod engine;
+pub mod ids;
 pub mod migrations;
+pub mod permissions;
 pub mod runtime;
 pub mod sidecar;
+pub mod workspace;
+
+use std::path::PathBuf;
 
 use serde::Serialize;
 
@@ -75,6 +80,137 @@ fn schema_version(db: tauri::State<'_, db::Db>) -> Result<i64, String> {
     db.schema_version().map_err(|e| e.to_string())
 }
 
+/// A workspace plus whether its directory is still there.
+///
+/// The two travel together because every screen that shows a workspace has to
+/// be able to offer the repair.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceView {
+    pub workspace: workspace::Workspace,
+    pub binding: workspace::Binding,
+}
+
+fn view(ws: workspace::Workspace) -> WorkspaceView {
+    let binding = workspace::binding(&ws);
+    WorkspaceView { workspace: ws, binding }
+}
+
+// Tauri generates the command shims from these signatures and requires owned
+// `State` and `AppHandle`, so none of these can be taken by reference.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn workspace_create(
+    db: tauri::State<'_, db::Db>,
+    name: String,
+    directory: PathBuf,
+) -> Result<WorkspaceView, String> {
+    workspace::create(&db, &name, &directory).map(view).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn workspace_list(db: tauri::State<'_, db::Db>) -> Result<Vec<WorkspaceView>, String> {
+    workspace::list(&db)
+        .map(|all| all.into_iter().map(view).collect())
+        .map_err(|e| e.to_string())
+}
+
+/// Open a workspace, and widen the asset protocol to what it may serve.
+///
+/// `assetProtocol.scope` ships empty and is filled in here, from the bound
+/// root and the granted directories only — never a wildcard, and never a
+/// folder the user did not grant (ticket 013).
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn workspace_open(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, db::Db>,
+    id: String,
+) -> Result<WorkspaceView, String> {
+    use tauri::Manager as _;
+    let ws = workspace::open(&db, &id).map_err(|e| e.to_string())?;
+    let scope = app.asset_protocol_scope();
+    for dir in permissions::granted_directories(&db, &ws).map_err(|e| e.to_string())? {
+        scope.allow_directory(&dir, true).map_err(|e| e.to_string())?;
+    }
+    Ok(view(ws))
+}
+
+/// Re-point a workspace whose folder moved. The id — and every row that
+/// references it — survives.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn workspace_relocate(
+    db: tauri::State<'_, db::Db>,
+    id: String,
+    directory: PathBuf,
+) -> Result<WorkspaceView, String> {
+    workspace::relocate(&db, &id, &directory).map(view).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn workspace_remove(db: tauri::State<'_, db::Db>, id: String) -> Result<(), String> {
+    workspace::remove(&db, &id).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn permission_grants(
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+) -> Result<Vec<permissions::Grant>, String> {
+    permissions::grants(&db, &workspace_id).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn permission_add(
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+    path: PathBuf,
+    operation: permissions::Operation,
+    source: permissions::Source,
+) -> Result<permissions::Grant, String> {
+    permissions::grant(&db, &workspace_id, &path, operation, source).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn permission_revoke(db: tauri::State<'_, db::Db>, grant_id: String) -> Result<(), String> {
+    permissions::revoke(&db, &grant_id).map_err(|e| e.to_string())
+}
+
+/// Persist the user's answer to a runtime prompt.
+///
+/// Answering the engine is the caller's next step, and is always `once`: the
+/// durable half of an *always* lives here, so workmate can show and revoke it.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn permission_reply(
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+    path: PathBuf,
+    operation: permissions::Operation,
+    reply: permissions::Reply,
+) -> Result<Option<permissions::Grant>, String> {
+    permissions::record_reply(&db, &workspace_id, &path, operation, reply)
+        .map_err(|e| e.to_string())
+}
+
+/// The ruleset a session in `worktree` is created with.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn permission_ruleset(
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+    worktree: PathBuf,
+) -> Result<Vec<permissions::Rule>, String> {
+    let ws = workspace::open(&db, &workspace_id).map_err(|e| e.to_string())?;
+    permissions::ruleset(&db, &ws, &worktree).map_err(|e| e.to_string())
+}
+
 /// # Panics
 /// Panics if the Tauri runtime cannot start, or if the database cannot be
 /// opened or migrated — neither is recoverable, and continuing without
@@ -93,7 +229,21 @@ pub fn run() {
             ));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![engine_info, schema_version, start_runtime])
+        .invoke_handler(tauri::generate_handler![
+            engine_info,
+            schema_version,
+            start_runtime,
+            workspace_create,
+            workspace_list,
+            workspace_open,
+            workspace_relocate,
+            workspace_remove,
+            permission_grants,
+            permission_add,
+            permission_revoke,
+            permission_reply,
+            permission_ruleset
+        ])
         .on_window_event(|window, event| {
             // `ExitRequested`, never `Exit`: by the time `Exit` fires the
             // runtime is tearing down and the engine is left orphaned.
