@@ -135,6 +135,16 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   source). Rust starts engine-then-sidecar and stops sidecar-then-engine, with
   readiness by handshake at both hops.
 
+- [Workspaces and the permission surface](tickets/013-workspaces-and-permissions.md)
+  — a workspace is an id bound to a canonicalised directory, so a moved folder is
+  repaired with one `UPDATE` and a missing one is a reported state, not an error.
+  Removing a workspace has to detach memory by hand: `memory_scope.scope_id` is
+  polymorphic, carries no foreign key, and the association was outliving the
+  workspace. Permissions compile into `OpenCode`'s ordered ruleset where position
+  is the policy — the user's checkout readable but never writable, the worktree
+  writable, `.git/` and `git push` unreachable by any grant. Bash allowances are
+  not storable at all, so "push always asks" holds by construction.
+
 ## Not yet specified
 
 - **Provider credentials UX** — how 12+ providers are added and presented, and
