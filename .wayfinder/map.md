@@ -195,6 +195,11 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   construction, an editable handoff, in-place recovery from blocks. Building it
   found that the engine was reading the user's own OpenCode directories (now
   isolated; see ticket 012) and that light mode never applied (fixed).
+- [Packaging, signing and release](tickets/021-packaging-and-release.md) — the
+  built app was launched and runs the engine and sidecar from its bundle; a 74 MB
+  dmg, so no first-run download; no updater in v1. Packaging found two real bugs
+  (globs flattening the packs; the engine outliving a Cmd-Q) now fixed and tested.
+  Signing, notarization and CI are written but unexecuted until the first tag.
 
 ## Not yet specified
 

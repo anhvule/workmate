@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hardened runtime is required for notarization. The bundled engine and
+       sidecar are JavaScript runtimes compiled to a binary: they JIT, so they
+       need these, and they load their own embedded code, so library
+       validation must be off. Nothing else is requested: no camera, no
+       microphone, no contacts, and no App Sandbox (the engine spawns git and
+       the user's shell by design). -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

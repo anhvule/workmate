@@ -85,6 +85,34 @@ fn auth_file(home: &Path) -> PathBuf {
     home.join("data").join("opencode").join("auth.json")
 }
 
+fn pid_file(home: &Path) -> PathBuf {
+    home.join("engine.pid")
+}
+
+/// Kill an engine a previous run of workmate left behind.
+///
+/// If workmate is killed or crashes, the engine it spawned is not told. It would
+/// keep running — holding its port, its database and any key it was given — with
+/// nothing to ever stop it. Its pid is recorded at launch; here the next launch
+/// checks that pid is still an `opencode` before killing it, because a pid
+/// number alone could belong to anything by now.
+#[cfg(unix)]
+fn reap_stale(home: &Path) {
+    let Ok(text) = std::fs::read_to_string(pid_file(home)) else { return };
+    let Ok(pid) = text.trim().parse::<u32>() else { return };
+    let name = Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output();
+    let is_engine = name.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("opencode"));
+    if is_engine {
+        let _ = Command::new("kill").arg(pid.to_string()).status();
+    }
+    let _ = std::fs::remove_file(pid_file(home));
+}
+
+#[cfg(not(unix))]
+fn reap_stale(home: &Path) {
+    let _ = std::fs::remove_file(pid_file(home));
+}
+
 /// Remove the key file the engine writes when it is given a credential.
 ///
 /// Keys live in the OS keychain; the engine is handed one for the length of its
@@ -115,6 +143,7 @@ impl Engine {
         for d in ["data", "config", "cache", "state"] {
             std::fs::create_dir_all(home.join(d))?;
         }
+        reap_stale(home);
         wipe_auth(home);
 
         // Private XDG directories: left alone, the engine would read and write
@@ -133,6 +162,7 @@ impl Engine {
             .stderr(Stdio::piped())
             .spawn()?;
 
+        let _ = std::fs::write(pid_file(home), child.id().to_string());
         let stdout = child.stdout.take().ok_or(EngineError::ExitedDuringStartup)?;
         let deadline = Instant::now() + READINESS_TIMEOUT;
         let mut reader = BufReader::new(stdout);
@@ -181,6 +211,7 @@ impl Engine {
         self.child.kill()?;
         let _ = self.child.wait();
         wipe_auth(&self.home);
+        let _ = std::fs::remove_file(pid_file(&self.home));
         Ok(())
     }
 }
@@ -299,6 +330,45 @@ mod tests {
         assert_eq!(a.len(), 64, "32 bytes, hex encoded");
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b, "a per-launch password must not repeat");
+    }
+
+    /// The crash case: a previous workmate died without stopping its engine.
+    #[cfg(unix)]
+    #[test]
+    fn an_engine_left_by_a_crashed_run_is_reaped_at_the_next_launch() {
+        let binary = Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries/opencode");
+        if !binary.exists() {
+            eprintln!("skipping: run `pnpm sidecar:fetch` to exercise this test");
+            return;
+        }
+        let _serial = REAL_ENGINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let home = std::env::temp_dir().join(crate::ids::new_id("engine-home"));
+        // A "previous run": an engine started, then its owner forgotten.
+        let mut first = Engine::start(&binary, &home).expect("first engine");
+        let stale_pid = first.child.id();
+        let orphan = std::mem::replace(&mut first.child, Command::new("true").spawn().unwrap());
+        std::mem::forget(orphan); // never killed: this is the crash
+        drop(first); // removes the pid file, as a clean stop would
+        std::fs::write(pid_file(&home), stale_pid.to_string()).unwrap(); // what a crash leaves
+        // A killed child we never waited on is a zombie, which still answers
+        // `kill -0`; "alive" means running.
+        let alive = |pid: u32| {
+            Command::new("ps")
+                .args(["-p", &pid.to_string(), "-o", "stat="])
+                .output()
+                .is_ok_and(|o| {
+                    let st = String::from_utf8_lossy(&o.stdout);
+                    let st = st.trim();
+                    !st.is_empty() && !st.starts_with('Z')
+                })
+        };
+        assert!(alive(stale_pid), "the orphan is still running");
+
+        let second = Engine::start(&binary, &home).expect("second engine");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!alive(stale_pid), "the next launch killed the orphan");
+        drop(second);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

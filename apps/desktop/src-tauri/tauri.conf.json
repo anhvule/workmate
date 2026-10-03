@@ -33,11 +33,13 @@
       "dmg",
       "app"
     ],
-    "resources": [
-      "binaries/*",
-      "packs/**/*",
-      "skills/**/*"
-    ],
+    "resources": {
+      "binaries": "binaries",
+      "packs": "packs",
+      "skills": "skills",
+      "../../../NOTICE": "NOTICE",
+      "../../../LICENSE": "LICENSE"
+    },
     "category": "DeveloperTool",
     "shortDescription": "A dev team that remembers your projects and lives in your repo.",
     "icon": [
@@ -46,6 +48,11 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "entitlements": "entitlements.plist",
+      "hardenedRuntime": true
+    }
   }
 }

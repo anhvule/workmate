@@ -1,0 +1,83 @@
+name: release
+
+# Tag `vX.Y.Z` to build, sign, notarize and draft a release. See docs/RELEASING.md.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14   # Apple silicon
+            arch: arm64
+          - os: macos-13   # Intel
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    env:
+      # Tauri signs the app and submits it for notarization when these are set.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the tag matches the app version
+        run: node scripts/check-release-version.mjs "${GITHUB_REF_NAME}"
+
+      - run: pnpm sidecar:fetch
+      - run: pnpm sidecar:build
+      - run: pnpm gate
+
+      - name: Import the signing certificate
+        run: bash scripts/import-certificate.sh
+      - name: Sign the bundled executables
+        # Tauri signs the app, not the executables inside Resources, and
+        # notarization rejects any unsigned Mach-O file.
+        run: bash scripts/sign-binaries.sh apps/desktop/src-tauri/binaries
+
+      - name: Build the app and disk image
+        run: pnpm --filter @workmate/desktop exec tauri build --bundles app,dmg
+
+      - name: Verify what shipped
+        run: bash scripts/verify-bundle.sh apps/desktop/src-tauri/target/release/bundle
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workmate-${{ matrix.arch }}
+          path: apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*/*.dmg \
+            --repo "${GITHUB_REPOSITORY}" --draft --generate-notes \
+            --title "workmate ${GITHUB_REF_NAME}"

@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    # One runner per architecture: the engine cannot be cross-compiled, so each
+    # target builds and tests on its own hardware (ticket 021).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-13]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+      # The pinned engine for this runner's architecture, then the sidecar.
+      - run: pnpm sidecar:fetch
+      - run: pnpm sidecar:build
+      # The same command the pre-commit hook runs: typecheck, lint, tests,
+      # the engine-contract drift check, clippy and cargo test.
+      - run: pnpm gate
+      # Needs the real engine and, on a cold cache, a network; opt-in locally,
+      # on in CI where both exist.
+      - run: pnpm test:e2e

@@ -911,18 +911,23 @@ pub fn run() {
             memory_delete,
             memory_export
         ])
-        .on_window_event(|window, event| {
-            // `ExitRequested`, never `Exit`: by the time `Exit` fires the
-            // runtime is tearing down and the engine is left orphaned.
-            if matches!(event, tauri::WindowEvent::Destroyed) {
+        .build(tauri::generate_context!())
+        .expect("error while building workmate")
+        .run(|app, event| {
+            // Stop the children when the *app* is going, not when a window
+            // is: on macOS closing the last window leaves the app (and its
+            // scheduled automations) alive, and quitting with Cmd-Q destroys
+            // no window at all — which orphaned the engine until this was
+            // found by quitting the built app. `ExitRequested` is the early
+            // chance, before teardown begins; `Exit` is the backstop. Shutdown
+            // is idempotent, so both may run.
+            if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
                 use tauri::Manager as _;
-                if let Some(rt) = window.app_handle().try_state::<runtime::Runtime>() {
+                if let Some(rt) = app.try_state::<runtime::Runtime>() {
                     let _ = rt.shutdown();
                 }
             }
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running workmate");
+        });
 }
 
 #[cfg(test)]
