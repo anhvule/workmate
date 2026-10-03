@@ -177,6 +177,11 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   workspace or global, only the user can add one, tools always ask, and delivery
   is `POST /mcp` per run so no restart is needed. Role scoping means the
   allowlist is genuinely exclusive now. Secret-bearing headers are not stored.
+- [Cron automations](tickets/019-automations.md) — a Rust scheduler over a
+  hand-written cron; one bounded run per fire, never overlapping itself; a slept
+  machine fires once or records a miss. Unattended runs get a ruleset where every
+  ask is a deny, answer `NOTHING_TO_REPORT` to stay quiet, and discard their
+  worktree when they do. Findings are kept and unseen until read.
 
 ## Not yet specified
 

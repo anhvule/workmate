@@ -77,7 +77,8 @@ impl<S: CredentialStore> Host<'_, S> {
             "permission.ruleset" => {
                 let ws = self.workspace_checkout(args)?;
                 let rules = permissions::ruleset(self.db, &ws, &self.worktree(args)?).map_err(|e| e.to_string())?;
-                to_row(&rules)
+                // Nobody is watching an unattended run, so nothing may ask.
+                to_row(&if flag(args, "unattended") { permissions::without_prompts(rules) } else { rules })
             }
             "credentials.provision" => self.provision(args),
             other => ops::dispatch(self.db, other, args),

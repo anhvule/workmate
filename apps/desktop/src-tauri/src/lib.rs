@@ -6,7 +6,9 @@
 //! takes that as a constraint from the first commit rather than a later fix
 //! (ticket 010).
 
+pub mod automation;
 pub mod credentials;
+pub mod cron;
 pub mod db;
 pub mod engine;
 pub mod events;
@@ -282,6 +284,102 @@ fn permission_ruleset(
     permissions::ruleset(&db, &ws, &worktree).map_err(|e| e.to_string())
 }
 
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn automation_create(
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+    name: String,
+    schedule: String,
+    objective: String,
+    roles: serde_json::Value,
+) -> Result<automation::Automation, String> {
+    automation::create(&db, &workspace_id, &name, &schedule, &objective, &roles).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn automation_list(db: tauri::State<'_, db::Db>) -> Result<Vec<automation::Automation>, String> {
+    automation::list(&db).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn automation_set_enabled(db: tauri::State<'_, db::Db>, id: String, enabled: bool) -> Result<(), String> {
+    automation::set_enabled(&db, &id, enabled).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn automation_remove(db: tauri::State<'_, db::Db>, id: String) -> Result<(), String> {
+    automation::remove(&db, &id).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn automation_run_now(db: tauri::State<'_, db::Db>, id: String) -> Result<(), String> {
+    automation::run_now(&db, &id).map_err(|e| e.to_string())
+}
+
+/// Fire history, newest first; `None` is the inbox across every automation.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn automation_history(
+    db: tauri::State<'_, db::Db>,
+    automation_id: Option<String>,
+) -> Result<Vec<automation::Fire>, String> {
+    automation::history(&db, automation_id.as_deref(), 200).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn automation_mark_seen(db: tauri::State<'_, db::Db>, fire_id: String) -> Result<(), String> {
+    automation::mark_seen(&db, &fire_id).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn automation_unseen(db: tauri::State<'_, db::Db>) -> Result<i64, String> {
+    automation::unseen_findings(&db).map_err(|e| e.to_string())
+}
+
+/// How often the scheduler looks. A minute-resolution schedule only needs the
+/// tick to be shorter than a minute.
+const SCHEDULER_TICK: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Start the scheduler thread.
+///
+/// It lives in Rust, not the webview, for the usual reason: a backgrounded
+/// `WKWebView` is throttled and an automation must still fire. When the runtime
+/// is not up there is nobody to run the work, so the tick is skipped and the slot
+/// stays due — it fires, or is recorded as missed, once there is.
+fn spawn_scheduler(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        use tauri::Manager as _;
+        if let Err(e) = automation::recover(&app.state::<db::Db>()) {
+            eprintln!("automations: could not recover interrupted fires: {e}");
+        }
+        loop {
+            std::thread::sleep(SCHEDULER_TICK);
+            let Ok(Some(commander)) = app.state::<runtime::Runtime>().commander() else { continue };
+            let start = |a: &automation::Automation, fire_id: &str| -> Result<String, String> {
+                let args = serde_json::json!({
+                    "workspaceId": a.workspace_id,
+                    "objective": automation::unattended_objective(&a.objective),
+                    "roles": a.roles,
+                    "unattended": true,
+                    "automation": { "id": a.id, "fireId": fire_id },
+                });
+                let out = commander.command("run.start", &args, std::time::Duration::from_secs(60))?;
+                out["runId"].as_str().map(str::to_owned).ok_or_else(|| "the sidecar did not return a run id".to_owned())
+            };
+            if let Err(e) = automation::tick(&app.state::<db::Db>(), db::now_ms(), &start) {
+                eprintln!("automations: tick failed: {e}");
+            }
+        }
+    });
+}
+
 /// Every configured MCP server, for the settings screen.
 #[expect(clippy::needless_pass_by_value)]
 #[tauri::command]
@@ -459,6 +557,7 @@ pub fn run() {
             app.manage(db::Db::open(&dir.join("workmate.sqlite3"))?);
             app.manage(engine::EngineState::default());
             app.manage(runtime::Runtime::default());
+            spawn_scheduler(app.handle().clone());
             app.manage(runtime::Binaries::in_dir(
                 &app.path().resolve("binaries", tauri::path::BaseDirectory::Resource)?,
             ));
@@ -485,6 +584,14 @@ pub fn run() {
             run_diff,
             run_merge,
             run_worktree_remove,
+            automation_create,
+            automation_list,
+            automation_set_enabled,
+            automation_remove,
+            automation_run_now,
+            automation_history,
+            automation_mark_seen,
+            automation_unseen,
             mcp_list,
             mcp_add,
             mcp_set_enabled,

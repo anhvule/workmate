@@ -33,6 +33,12 @@ const parseRoles = (raw: unknown): RoleSpec[] => {
   });
 };
 
+const parseAutomation = (raw: unknown): { id: string; fireId: string } | undefined => {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  return { id: str(o, "id"), fireId: str(o, "fireId") };
+};
+
 export const commands = (deps: { orch: Orchestrator; db: DbClient; engine: EnginePort }): Record<string, Command> => {
   const { orch, db, engine } = deps;
   const ws = (a: Record<string, unknown>): { workspaceId: string; runId: string } => ({
@@ -47,6 +53,8 @@ export const commands = (deps: { orch: Orchestrator; db: DbClient; engine: Engin
         roles: parseRoles(a["roles"]),
         teamId: typeof a["teamId"] === "string" ? a["teamId"] : undefined,
         review: a["review"] === true,
+        unattended: a["unattended"] === true,
+        automation: parseAutomation(a["automation"]),
       }),
     "run.pause": async (a) => void orch.get(str(a, "runId")).pause(),
     "run.resume": async (a) => void orch.get(str(a, "runId")).resume(),

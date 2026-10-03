@@ -175,6 +175,7 @@ pub fn dispatch(db: &Db, op: &str, args: &Value) -> Rows {
         // never register a server, because a local server is a command the
         // machine will run.
         "mcp.configs" => crate::mcp::engine_configs(db, args),
+        "automation.finish" => crate::automation::finish_op(db, args),
         "memory.remember" => memory::remember(db, args),
         "memory.list" => memory::list(db, args),
         "memory.recall" => memory::recall(db, args),

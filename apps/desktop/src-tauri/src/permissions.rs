@@ -285,6 +285,25 @@ pub fn ruleset(db: &Db, ws: &Workspace, worktree: &Path) -> Result<Vec<Rule>, Pe
     Ok(compile_with_mcp(&ws.directory, worktree, &grants(db, &ws.id)?, &servers))
 }
 
+/// The ruleset for a run nobody is watching: every *ask* becomes a *deny*.
+///
+/// Asking would either block the run forever or invite auto-approval, and both
+/// are worse than refusing. Only the *ask* band moves; allows stay allows and
+/// the hard denies are untouched, so this can only narrow what a run may do
+/// (ticket 019).
+#[must_use]
+pub fn without_prompts(rules: Vec<Rule>) -> Vec<Rule> {
+    rules
+        .into_iter()
+        .map(|mut r| {
+            if r.action == Action::Ask {
+                r.action = Action::Deny;
+            }
+            r
+        })
+        .collect()
+}
+
 fn rule(permission: &str, pattern: impl Into<String>, action: Action) -> Rule {
     Rule {
         permission: permission.to_owned(),
@@ -658,5 +677,21 @@ mod tests {
             ));
         }
         assert!(grant(&db, "w", Path::new("/p/ok[1]"), Operation::Read, Source::User).is_ok());
+    }
+
+    #[test]
+    fn an_unattended_ruleset_has_no_prompts_and_loses_no_denials() {
+        let rules = compile_with_mcp(Path::new("/p"), Path::new("/wt"), &[], &["gh".into()]);
+        let asks = rules.iter().filter(|r| r.action == Action::Ask).count();
+        assert!(asks >= 3, "the attended set does ask");
+        let quiet = without_prompts(rules.clone());
+        assert!(quiet.iter().all(|r| r.action != Action::Ask));
+        assert_eq!(quiet.len(), rules.len(), "same shape, same order");
+        let denies = |v: &[Rule]| v.iter().filter(|r| r.action == Action::Deny).count();
+        assert_eq!(denies(&quiet), denies(&rules) + asks);
+        let allows = |v: &[Rule]| v.iter().filter(|r| r.action == Action::Allow).count();
+        assert_eq!(allows(&quiet), allows(&rules), "nothing is widened");
+        let gh = quiet.iter().find(|r| r.permission == "gh_*").unwrap();
+        assert_eq!(gh.action, Action::Deny, "an MCP tool cannot run unattended");
     }
 }

@@ -41,6 +41,10 @@ export interface StartRun {
   readonly teamId?: string | undefined;
   /** Stop at every handoff for the user, as if they had paused. */
   readonly review?: boolean | undefined;
+  /** Nobody is watching: the ruleset has no prompts, and the outcome is reported. */
+  readonly unattended?: boolean | undefined;
+  /** Set when a scheduled automation started this run. */
+  readonly automation?: { readonly id: string; readonly fireId: string } | undefined;
 }
 
 /** What the orchestrator needs from the engine; the real adapter wraps the HTTP client. */
@@ -75,7 +79,9 @@ export type RunEvent =
   | { name: "run.handoff.proposed"; payload: { runId: string; from: string; to: string; context: string; editable: boolean } }
   | { name: "run.handoff.delivered"; payload: { runId: string; from: string; to: string; context: string } }
   | { name: "run.blocked"; payload: { runId: string; reason: BlockReason } }
-  | { name: "run.finished"; payload: { runId: string; reason: "completed" | "vetoed" } };
+  | { name: "run.finished"; payload: { runId: string; reason: "completed" | "vetoed" } }
+  /** An unattended run found something worth reading. Quiet runs emit nothing. */
+  | { name: "automation.finding"; payload: { runId: string; fireId: string; automationId: string } };
 
 export type BlockReason =
   | { kind: "credential"; role: string; providerId: string; tried: readonly string[] }
@@ -217,8 +223,17 @@ export class Run {
     this.deps.emit({ name: "run.changed", payload: { runId: this.id, phase } });
   }
 
+  /** Tell Rust how an automation's run ended, so its history is complete. */
+  private async report(outcome: "completed" | "blocked", summary: string): Promise<boolean> {
+    const auto = this.input.automation;
+    if (!auto) return false;
+    const rows = await this.deps.db.call("automation.finish", { fireId: auto.fireId, outcome, summary });
+    return (rows[0] as { quiet?: boolean } | undefined)?.quiet === true;
+  }
+
   private async block(reason: BlockReason): Promise<void> {
     await this.setPhase("blocked");
+    await this.report("blocked", JSON.stringify(reason));
     this.deps.emit({ name: "run.blocked", payload: { runId: this.id, reason } });
     this.resumeGate = new Gate<void>();
     await this.resumeGate.promise;
@@ -245,6 +260,7 @@ export class Run {
     const rules = (await this.deps.db.call("permission.ruleset", {
       workspaceId: this.input.workspaceId,
       runId: this.id,
+      unattended: this.input.unattended === true,
     })) as readonly unknown[];
     const body: Parameters<EnginePort["createSession"]>[1] = {
       title: `${role.name}: ${this.input.objective}`.slice(0, 120),
@@ -344,6 +360,7 @@ export class Run {
     const roles = this.input.roles;
     let index = 0;
     let incoming: { from: SessionId; prompt: string } | undefined;
+    let lastText = "";
 
     while (index < roles.length) {
       const role = roleOf(roles, index);
@@ -361,7 +378,7 @@ export class Run {
         this.deps.emit({ name: "run.handoff.delivered", payload: { runId: this.id, from: incoming.from, to: session, context: incoming.prompt } });
       }
 
-      await this.takeTurn(role, session, incoming?.prompt ?? this.input.objective);
+      lastText = await this.takeTurn(role, session, incoming?.prompt ?? this.input.objective);
       this.lastSession = session;
 
       if (index === roles.length - 1) break;
@@ -395,6 +412,29 @@ export class Run {
 
     await this.setPhase("done");
     this.deps.emit({ name: "run.finished", payload: { runId: this.id, reason: "completed" } });
+    await this.settleAutomation(lastText);
+  }
+
+  /**
+   * An unattended run that found nothing leaves no trace but its history row:
+   * the worktree and branch are discarded. One that found something is kept for
+   * the user to read, with a finding raised (ticket 019).
+   */
+  private async settleAutomation(finalText: string): Promise<void> {
+    const auto = this.input.automation;
+    if (!auto) return;
+    const quiet = await this.report("completed", finalText);
+    if (quiet) {
+      await this.deps.db.call("repo.removeWorktree", {
+        workspaceId: this.input.workspaceId,
+        runId: this.id,
+        abandon: true,
+        force: true,
+      });
+      await this.setPhase("archived");
+      return;
+    }
+    this.deps.emit({ name: "automation.finding", payload: { runId: this.id, fireId: auto.fireId, automationId: auto.id } });
   }
 
   get last(): SessionId | undefined {

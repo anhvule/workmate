@@ -167,6 +167,39 @@ CREATE TABLE mcp_server (
 CREATE UNIQUE INDEX mcp_server_name ON mcp_server(coalesce(workspace_id, ''), name);
 ";
 
+/// Cron automations (ticket 019). A fire is history, not state: it survives its
+/// run being archived, so `run_id` carries no foreign key.
+///
+/// V1 reserved an `automation` table before the design existed. Nothing ever
+/// wrote to it, so it is replaced rather than altered into shape.
+const V4: &str = r"
+DROP TABLE automation;
+CREATE TABLE automation (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    schedule     TEXT NOT NULL,
+    objective    TEXT NOT NULL,
+    roles        TEXT NOT NULL,
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    next_fire_at INTEGER,
+    created_at   INTEGER NOT NULL
+);
+
+CREATE TABLE automation_fire (
+    id            TEXT PRIMARY KEY,
+    automation_id TEXT NOT NULL REFERENCES automation(id) ON DELETE CASCADE,
+    scheduled_for INTEGER NOT NULL,
+    started_at    INTEGER NOT NULL,
+    run_id        TEXT,
+    outcome       TEXT NOT NULL CHECK (outcome IN
+                    ('started','completed','quiet','blocked','failed','skipped_overlap','missed')),
+    summary       TEXT NOT NULL DEFAULT '',
+    seen          INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX automation_fire_recent ON automation_fire(automation_id, started_at DESC);
+";
+
 const LADDER: &[Migration] = &[
     Migration {
         version: 1,
@@ -182,6 +215,11 @@ const LADDER: &[Migration] = &[
         version: 3,
         name: "mcp servers",
         sql: V3,
+    },
+    Migration {
+        version: 4,
+        name: "automations",
+        sql: V4,
     },
 ];
 
