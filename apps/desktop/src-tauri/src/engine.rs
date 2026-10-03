@@ -230,6 +230,11 @@ impl EngineState {
     }
 }
 
+/// Tests that start the real engine take this: two engines at once contend
+/// for the same on-disk state and one exits during startup.
+#[cfg(test)]
+pub(crate) static REAL_ENGINE: Mutex<()> = Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,6 +302,7 @@ mod tests {
             eprintln!("skipping: run `pnpm sidecar:fetch` to exercise this test");
             return;
         }
+        let _serial = REAL_ENGINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let engine = Engine::start(&binary).expect("engine should start");
         let addr = engine.address();
         assert!(addr.base_url.starts_with("http://127.0.0.1:"));

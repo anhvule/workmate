@@ -166,6 +166,13 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   TypeScript builds the bounded digest and serves `remember`/`recall` over a
   token-guarded loopback MCP endpoint that carries run/role identity in its path.
   Survival across workspace deletion is tested. The panel UI waits on the shell.
+- [Run and team orchestration](tickets/014-run-orchestration.md) — one loop for
+  every run, so a solo run is a plain chat by construction. Roles share the run's
+  worktree (teams are sequential). Pause bites at the next handoff, where the user
+  can amend, redirect or veto; missing keys and engine errors block rather than
+  fail. Credentials are provisioned to the engine by Rust and never cross the
+  pipe. Proven against fakes; the first live model turn will confirm two engine
+  assumptions.
 
 ## Not yet specified
 

@@ -11,6 +11,8 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::collections::HashMap;
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -86,6 +88,27 @@ pub fn hello(address: &EngineAddress) -> Result<String, SidecarError> {
 /// Serves a named persistence operation: `(op, args)` to rows or a message.
 pub type Handler = Arc<dyn Fn(&str, &Value) -> Result<Vec<Value>, String> + Send + Sync>;
 
+/// Where the sidecar's `event` messages go (the webview, in the real app).
+pub type EventOut = Arc<dyn Fn(&str, &Value) + Send + Sync>;
+
+/// What Rust does with traffic from the sidecar.
+#[derive(Clone)]
+pub struct Hooks {
+    pub handler: Handler,
+    pub on_event: EventOut,
+}
+
+impl Hooks {
+    /// Persistence only; events are dropped. For tests and headless use.
+    #[must_use]
+    pub fn db_only(handler: Handler) -> Self {
+        Self { handler, on_event: Arc::new(|_, _| {}) }
+    }
+}
+
+type CmdResult = Result<Value, String>;
+type Pending = Arc<Mutex<HashMap<String, Sender<CmdResult>>>>;
+
 /// The reply to one `db.call`, by request id.
 ///
 /// Both outcomes are replies: a failing operation must answer, or the sidecar
@@ -102,17 +125,34 @@ pub fn reply(id: &str, outcome: Result<Vec<Value>, String>) -> String {
 /// Serve one line of post-handshake sidecar output. Returns the reply to write,
 /// if the line was a `db.call`.
 ///
-/// Anything else is logged and dropped: `fault` is the sidecar's own account of
-/// itself, and `event` forwarding belongs to the event stream (ticket 023).
+/// `event` goes to the webview via the hook; `cmd.result` completes the command
+/// waiting on it; `fault` is logged. Unknown traffic is dropped.
 #[must_use]
-pub fn serve(line: &str, handler: &Handler) -> Option<String> {
+pub fn serve(line: &str, hooks: &Hooks, pending: &Pending) -> Option<String> {
     let value: Value = serde_json::from_str(line).ok()?;
     match value.get("type").and_then(Value::as_str)? {
         "db.call" => {
             let id = value.get("id").and_then(Value::as_str)?;
             let op = value.get("op").and_then(Value::as_str).unwrap_or_default();
             let args = value.get("args").cloned().unwrap_or(Value::Null);
-            Some(reply(id, handler(op, &args)))
+            Some(reply(id, (hooks.handler)(op, &args)))
+        }
+        "event" => {
+            let name = value.get("name").and_then(Value::as_str)?;
+            (hooks.on_event)(name, value.get("payload").unwrap_or(&Value::Null));
+            None
+        }
+        "cmd.result" => {
+            let id = value.get("id").and_then(Value::as_str)?;
+            let outcome = if value.get("ok").and_then(Value::as_bool) == Some(true) {
+                Ok(value.get("value").cloned().unwrap_or(Value::Null))
+            } else {
+                Err(value.get("message").and_then(Value::as_str).unwrap_or("command failed").to_owned())
+            };
+            if let Some(tx) = pending.lock().ok()?.remove(id) {
+                let _ = tx.send(outcome);
+            }
+            None
         }
         "fault" => {
             eprintln!("sidecar fault: {}", value.get("message").and_then(Value::as_str).unwrap_or("?"));
@@ -122,10 +162,45 @@ pub fn serve(line: &str, handler: &Handler) -> Option<String> {
     }
 }
 
+/// A cheap handle for sending commands to the sidecar from any thread.
+#[derive(Clone)]
+pub struct Commander {
+    stdin: Arc<Mutex<ChildStdin>>,
+    pending: Pending,
+}
+
+impl Commander {
+    /// Send a command and wait for its result.
+    ///
+    /// # Errors
+    /// A message if the sidecar is gone, does not answer within `timeout`, or
+    /// reports the command failed.
+    pub fn command(&self, name: &str, args: &Value, timeout: Duration) -> Result<Value, String> {
+        let id = crate::ids::new_id("cmd");
+        let (tx, rx) = mpsc::channel();
+        self.pending.lock().map_err(|_| "poisoned")?.insert(id.clone(), tx);
+        let line = format!("{}\n", json!({"type": "cmd", "id": id, "name": name, "args": args}));
+        let sent = self
+            .stdin
+            .lock()
+            .map_err(|_| "poisoned".to_owned())
+            .and_then(|mut w| w.write_all(line.as_bytes()).and_then(|()| w.flush()).map_err(|e| e.to_string()));
+        if let Err(e) = sent {
+            self.pending.lock().ok().and_then(|mut p| p.remove(&id));
+            return Err(format!("the sidecar is not reachable: {e}"));
+        }
+        let outcome = rx.recv_timeout(timeout);
+        // Whatever happened, nothing may wait on this id any more.
+        self.pending.lock().ok().and_then(|mut p| p.remove(&id));
+        outcome.map_err(|_| format!("`{name}` timed out after {timeout:?}"))?
+    }
+}
+
 #[derive(Debug)]
 pub struct Sidecar {
     child: Child,
     stdin: Arc<Mutex<ChildStdin>>,
+    pending: Pending,
     pub pid: i64,
 }
 
@@ -138,7 +213,7 @@ impl Sidecar {
     pub fn start(
         binary: &Path,
         address: &EngineAddress,
-        handler: Handler,
+        hooks: Hooks,
     ) -> Result<Self, SidecarError> {
         if !binary.exists() {
             return Err(SidecarError::BinaryMissing(binary.to_path_buf()));
@@ -172,8 +247,9 @@ impl Sidecar {
                 }
                 Ok(_) => match classify(&line) {
                     Handshake::Ready { pid } => {
-                        Self::pump(reader, &stdin, handler);
-                        return Ok(Self { child, stdin, pid });
+                        let pending = Pending::default();
+                        Self::pump(reader, &stdin, hooks, Arc::clone(&pending));
+                        return Ok(Self { child, stdin, pending, pid });
                     }
                     Handshake::Fault(message) => {
                         let _ = child.kill();
@@ -197,7 +273,8 @@ impl Sidecar {
     fn pump(
         mut reader: BufReader<std::process::ChildStdout>,
         stdin: &Arc<Mutex<ChildStdin>>,
-        handler: Handler,
+        hooks: Hooks,
+        pending: Pending,
     ) {
         let stdin = Arc::clone(stdin);
         std::thread::spawn(move || {
@@ -208,13 +285,19 @@ impl Sidecar {
                     Ok(0) | Err(_) => return,
                     Ok(_) => {}
                 }
-                let Some(out) = serve(&line, &handler) else { continue };
+                let Some(out) = serve(&line, &hooks, &pending) else { continue };
                 let Ok(mut w) = stdin.lock() else { return };
                 if w.write_all(out.as_bytes()).and_then(|()| w.flush()).is_err() {
                     return;
                 }
             }
         });
+    }
+
+    /// A handle for sending commands to the sidecar.
+    #[must_use]
+    pub fn commander(&self) -> Commander {
+        Commander { stdin: Arc::clone(&self.stdin), pending: Arc::clone(&self.pending) }
     }
 
     /// Ask the sidecar to stop, then make sure it did.
@@ -252,29 +335,56 @@ mod tests {
         }
     }
 
-    fn no_ops() -> Handler {
-        Arc::new(|_, _| Ok(vec![]))
+    fn no_ops() -> Hooks {
+        Hooks::db_only(Arc::new(|_, _| Ok(vec![])))
+    }
+
+    fn idle() -> Pending {
+        Pending::default()
     }
 
     #[test]
     fn a_db_call_is_answered_by_id_with_rows_or_an_error() {
-        let h: Handler = Arc::new(|op, args| {
+        let h = Hooks::db_only(Arc::new(|op, args| {
             if op == "ok" { Ok(vec![args.clone()]) } else { Err(format!("no {op}")) }
-        });
-        let ok = serve(r#"{"type":"db.call","id":"7","op":"ok","args":{"a":1}}"#, &h).unwrap();
+        }));
+        let ok = serve(r#"{"type":"db.call","id":"7","op":"ok","args":{"a":1}}"#, &h, &idle()).unwrap();
         let v: Value = serde_json::from_str(ok.trim()).unwrap();
         assert_eq!((v["type"].as_str(), v["id"].as_str()), (Some("db.result"), Some("7")));
         assert_eq!(v["rows"][0]["a"], 1);
-        let bad = serve(r#"{"type":"db.call","id":"8","op":"nope"}"#, &h).unwrap();
+        let bad = serve(r#"{"type":"db.call","id":"8","op":"nope"}"#, &h, &idle()).unwrap();
         assert!(bad.contains("db.error") && bad.contains("no nope"));
+    }
+
+    #[test]
+    fn events_reach_the_hook_and_command_results_reach_their_waiter() {
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = Arc::clone(&seen);
+        let hooks = Hooks {
+            handler: Arc::new(|_, _| Ok(vec![])),
+            on_event: Arc::new(move |name, payload| sink.lock().unwrap().push(format!("{name}={payload}"))),
+        };
+        let pending = idle();
+        assert!(serve(r#"{"type":"event","name":"run.updated","payload":{"n":1}}"#, &hooks, &pending).is_none());
+        assert_eq!(seen.lock().unwrap().as_slice(), [r#"run.updated={"n":1}"#]);
+
+        let (tx, rx) = mpsc::channel();
+        pending.lock().unwrap().insert("c1".into(), tx);
+        let _ = serve(r#"{"type":"cmd.result","id":"c1","ok":true,"value":{"x":2}}"#, &hooks, &pending);
+        assert_eq!(rx.recv().unwrap().unwrap()["x"], 2);
+        let (tx, rx) = mpsc::channel();
+        pending.lock().unwrap().insert("c2".into(), tx);
+        let _ = serve(r#"{"type":"cmd.result","id":"c2","ok":false,"message":"nope"}"#, &hooks, &pending);
+        assert_eq!(rx.recv().unwrap().unwrap_err(), "nope");
     }
 
     #[test]
     fn other_traffic_and_noise_get_no_reply() {
         let h = no_ops();
-        assert!(serve(r#"{"type":"event","name":"x"}"#, &h).is_none());
-        assert!(serve(r#"{"type":"fault","message":"m"}"#, &h).is_none());
-        assert!(serve("not json", &h).is_none());
+        assert!(serve(r#"{"type":"event","name":"x"}"#, &h, &idle()).is_none());
+        assert!(serve(r#"{"type":"fault","message":"m"}"#, &h, &idle()).is_none());
+        assert!(serve("not json", &h, &idle()).is_none());
+        assert!(serve(r#"{"type":"cmd.result","id":"nobody","ok":true}"#, &h, &idle()).is_none());
     }
 
     /// A stand-in sidecar over real pipes: it announces ready, makes a call,
@@ -299,7 +409,7 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let h: Handler = Arc::new(|_, args| Ok(vec![args.clone()]));
+        let h = Hooks::db_only(Arc::new(|_, args| Ok(vec![args.clone()])));
         let _sidecar = Sidecar::start(&script, &address(), h).unwrap();
         for _ in 0..100 {
             if out.exists() && std::fs::metadata(&out).unwrap().len() > 0 { break; }

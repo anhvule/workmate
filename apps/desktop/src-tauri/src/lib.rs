@@ -10,6 +10,7 @@ pub mod credentials;
 pub mod db;
 pub mod engine;
 pub mod events;
+pub mod host;
 pub mod ids;
 pub mod memory;
 pub mod migrations;
@@ -74,13 +75,33 @@ fn start_runtime(
     binaries: tauri::State<'_, runtime::Binaries>,
 ) -> Result<String, String> {
     use tauri::Manager as _;
-    // The handler serves the sidecar's persistence calls on Rust's connection:
-    // the one writer (ticket 026).
+    // Persistence and host operations run here, in Rust, on Rust's connection:
+    // the one writer (tickets 024 and 026). Anything that is not a host
+    // operation falls through to the named database operations.
     let db_app = app.clone();
     let handler: sidecar::Handler = std::sync::Arc::new(move |op, args| {
-        ops::dispatch(&db_app.state::<db::Db>(), op, args)
+        let root = worktree_root(&db_app)?;
+        let engine = db_app
+            .state::<runtime::Runtime>()
+            .address()
+            .map_err(|e| e.to_string())?;
+        host::Host {
+            db: &db_app.state::<db::Db>(),
+            worktree_root: &root,
+            engine,
+            store: &credentials::Keychain,
+        }
+        .dispatch(op, args)
     });
-    let address = rt.start(&binaries, handler).map_err(|e| e.to_string())?;
+    // The sidecar's own events (run progress, handoffs) reach the webview as
+    // `workmate:<name>`; Tauri rejects dots in names.
+    let ev_app = app.clone();
+    let on_event: sidecar::EventOut = std::sync::Arc::new(move |name, payload| {
+        use tauri::Emitter as _;
+        let _ = ev_app.emit(&format!("workmate:{}", name.replace('.', "_")), payload);
+    });
+    let hooks = sidecar::Hooks { handler, on_event };
+    let address = rt.start(&binaries, hooks).map_err(|e| e.to_string())?;
     // The sink runs here, in Rust, whether or not a window is watching: a
     // backgrounded `WKWebView` is throttled and would miss completion. The
     // webview gets a scrubbed copy to render (ticket 023).
@@ -94,6 +115,30 @@ fn start_runtime(
     })
     .map_err(|e| e.to_string())?;
     Ok(address.base_url)
+}
+
+/// Send a command to the sidecar and wait for its answer.
+///
+/// This is how the webview drives a run (start, pause, amend, veto …): through
+/// Rust, to the sidecar, with the result coming back here. The webview persists
+/// nothing; whatever a command changes is written by Rust and announced as an
+/// event (ticket 014).
+#[tauri::command]
+async fn sidecar_command(
+    rt: tauri::State<'_, runtime::Runtime>,
+    name: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let commander = rt
+        .commander()
+        .map_err(|e| e.to_string())?
+        .ok_or("the runtime is not started")?;
+    // Blocking I/O: off the async executor.
+    tauri::async_runtime::spawn_blocking(move || {
+        commander.command(&name, &args, std::time::Duration::from_secs(120))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// The schema version this build expects, surfaced for diagnostics.
@@ -390,6 +435,7 @@ pub fn run() {
             engine_info,
             schema_version,
             start_runtime,
+            sidecar_command,
             workspace_create,
             workspace_list,
             workspace_open,

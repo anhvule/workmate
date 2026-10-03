@@ -82,12 +82,27 @@ pub trait CredentialStore {
     /// # Errors
     /// Returns [`CredentialError`] if the store cannot be queried.
     fn contains(&self, account: &str) -> Result<bool, CredentialError>;
+
+    /// The secret itself. Only Rust ever calls this, to hand a key to the
+    /// engine; it must never be logged or returned over the sidecar pipe.
+    ///
+    /// # Errors
+    /// Returns [`CredentialError`] if the store cannot be queried.
+    fn secret(&self, account: &str) -> Result<Option<String>, CredentialError>;
 }
 
 /// The real OS keychain.
 pub struct Keychain;
 
 impl CredentialStore for Keychain {
+    fn secret(&self, account: &str) -> Result<Option<String>, CredentialError> {
+        match keyring::Entry::new(SERVICE, account).and_then(|e| e.get_password()) {
+            Ok(s) => Ok(Some(s)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(CredentialError::Keyring(e)),
+        }
+    }
+
     fn contains(&self, account: &str) -> Result<bool, CredentialError> {
         match keyring::Entry::new(SERVICE, account).and_then(|e| e.get_password()) {
             Ok(_) => Ok(true),
@@ -182,6 +197,10 @@ mod tests {
         }
     }
     impl CredentialStore for Fake {
+        fn secret(&self, account: &str) -> Result<Option<String>, CredentialError> {
+            Ok(self.0.contains(account).then(|| format!("secret-for-{account}")))
+        }
+
         fn contains(&self, account: &str) -> Result<bool, CredentialError> {
             Ok(self.0.contains(account))
         }

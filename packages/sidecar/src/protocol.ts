@@ -13,6 +13,8 @@ export type Inbound =
   | { readonly type: "hello"; readonly engine: EngineAddress }
   | { readonly type: "db.result"; readonly id: string; readonly rows: readonly unknown[] }
   | { readonly type: "db.error"; readonly id: string; readonly message: string }
+  /** A command from the webview, relayed by Rust. Answered with `cmd.result`. */
+  | { readonly type: "cmd"; readonly id: string; readonly name: string; readonly args: Record<string, unknown> }
   | { readonly type: "shutdown" };
 
 /** sidecar → Rust. */
@@ -22,6 +24,8 @@ export type Outbound =
   /** A named operation, never SQL: the schema stays Rust's (ticket 026). */
   | { readonly type: "db.call"; readonly id: string; readonly op: string; readonly args: Record<string, unknown> }
   | { readonly type: "event"; readonly name: string; readonly payload: unknown }
+  | { readonly type: "cmd.result"; readonly id: string; readonly ok: true; readonly value: unknown }
+  | { readonly type: "cmd.result"; readonly id: string; readonly ok: false; readonly message: string }
   | { readonly type: "fault"; readonly message: string };
 
 export interface EngineAddress {
@@ -129,6 +133,13 @@ export const parseInbound = (line: string): Inbound => {
         throw new ProtocolError("db.error is missing id or message");
       }
       return { type: "db.error", id, message };
+    }
+    case "cmd": {
+      const { id, name, args } = value;
+      if (typeof id !== "string" || typeof name !== "string") {
+        throw new ProtocolError("cmd is missing id or name");
+      }
+      return { type: "cmd", id, name, args: isRecord(args) ? args : {} };
     }
     case "shutdown":
       return { type: "shutdown" };

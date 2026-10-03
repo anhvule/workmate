@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use crate::engine::{Engine, EngineAddress, EngineError};
 use crate::events::Subscriber;
-use crate::sidecar::{Handler, Sidecar, SidecarError};
+use crate::sidecar::{Commander, Hooks, Sidecar, SidecarError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
@@ -67,7 +67,7 @@ impl Runtime {
     /// Returns [`RuntimeError`] if either child fails to start. The engine is
     /// stopped again if the sidecar fails, so a half-started runtime is never
     /// left behind.
-    pub fn start(&self, binaries: &Binaries, handler: Handler) -> Result<EngineAddress, RuntimeError> {
+    pub fn start(&self, binaries: &Binaries, hooks: Hooks) -> Result<EngineAddress, RuntimeError> {
         let mut children = self.children.lock().map_err(|_| RuntimeError::Poisoned)?;
         if let Some(engine) = children.engine.as_ref() {
             if children.sidecar.is_some() {
@@ -78,7 +78,7 @@ impl Runtime {
         let engine = Engine::start(&binaries.engine)?;
         let address = engine.address().clone();
 
-        match Sidecar::start(&binaries.sidecar, &address, handler) {
+        match Sidecar::start(&binaries.sidecar, &address, hooks) {
             Ok(sidecar) => {
                 children.engine = Some(engine);
                 children.sidecar = Some(sidecar);
@@ -128,6 +128,16 @@ impl Runtime {
         Ok(())
     }
 
+    /// A handle for commanding the sidecar, if it is up. The handle is cloned out
+    /// so a slow command never holds the runtime's lock.
+    ///
+    /// # Errors
+    /// Returns [`RuntimeError::Poisoned`] if a holder of the lock panicked.
+    pub fn commander(&self) -> Result<Option<Commander>, RuntimeError> {
+        let children = self.children.lock().map_err(|_| RuntimeError::Poisoned)?;
+        Ok(children.sidecar.as_ref().map(Sidecar::commander))
+    }
+
     /// The engine address, if the runtime is up.
     ///
     /// # Errors
@@ -142,8 +152,8 @@ impl Runtime {
 mod tests {
     use super::*;
 
-    fn no_ops() -> Handler {
-        std::sync::Arc::new(|_, _| Ok(vec![]))
+    fn no_ops() -> Hooks {
+        Hooks::db_only(std::sync::Arc::new(|_, _| Ok(vec![])))
     }
 
     fn bundled() -> Binaries {
@@ -182,6 +192,7 @@ mod tests {
             eprintln!("skipping: run `pnpm sidecar:fetch && pnpm sidecar:build`");
             return;
         }
+        let _serial = crate::engine::REAL_ENGINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let runtime = Runtime::default();
         let address = runtime.start(&binaries, no_ops()).expect("runtime should start");
         assert!(address.base_url.starts_with("http://127.0.0.1:"));
