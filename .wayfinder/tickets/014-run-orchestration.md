@@ -81,3 +81,20 @@ effect outside the process is a named operation Rust serves.
   behaviours are assumptions to confirm on first live run: that `POST /mcp` with
   an existing name replaces the registration, and that a session `permission`
   ruleset accepts the compiled array as sent.
+
+### Addendum — verified against the real engine
+
+The two assumptions above were checked with `pnpm test:e2e`
+(`packages/sidecar/src/engine.e2e.test.ts`): the real bundled engine, a fake
+OpenAI-compatible model, and the sidecar's own memory endpoint. Both hold:
+
+- A session accepts the compiled permission ruleset exactly as workmate sends it,
+  runs a real turn, keeps the transcript, and receives the per-turn `system` field.
+- `POST /mcp` under an existing name replaces it (one entry afterwards).
+- The engine connects to the loopback memory endpoint with its bearer token, gives
+  the model `workmate-memory_remember` / `_recall` (the names the allowlist already
+  assumed), and a model-issued tool call reaches `memory.remember` attributed to
+  the right run and scope.
+
+The test is opt-in rather than in the gate: it spawns the engine and, on a cold
+cache, fetches a provider package.

@@ -27,11 +27,14 @@ pub enum RuntimeError {
 pub struct Binaries {
     pub engine: PathBuf,
     pub sidecar: PathBuf,
+    /// The engine's private home: its data, config, cache and state. Never the
+    /// user's own `OpenCode` directories.
+    pub home: PathBuf,
 }
 
 impl Binaries {
     #[must_use]
-    pub fn in_dir(dir: &Path) -> Self {
+    pub fn in_dir(dir: &Path, home: &Path) -> Self {
         let exe = |name: &str| {
             dir.join(if cfg!(windows) {
                 format!("{name}.exe")
@@ -42,6 +45,7 @@ impl Binaries {
         Self {
             engine: exe("opencode"),
             sidecar: exe("workmate-sidecar"),
+            home: home.to_path_buf(),
         }
     }
 }
@@ -75,7 +79,7 @@ impl Runtime {
             }
         }
 
-        let engine = Engine::start(&binaries.engine)?;
+        let engine = Engine::start(&binaries.engine, &binaries.home)?;
         let address = engine.address().clone();
 
         match Sidecar::start(&binaries.sidecar, &address, hooks) {
@@ -157,12 +161,15 @@ mod tests {
     }
 
     fn bundled() -> Binaries {
-        Binaries::in_dir(&Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries"))
+        Binaries::in_dir(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries"),
+            &std::env::temp_dir().join(crate::ids::new_id("engine-home")),
+        )
     }
 
     #[test]
     fn binary_names_are_resolved_under_one_directory() {
-        let b = Binaries::in_dir(Path::new("/x"));
+        let b = Binaries::in_dir(Path::new("/x"), Path::new("/h"));
         assert!(b.engine.ends_with("opencode") || b.engine.ends_with("opencode.exe"));
         assert!(
             b.sidecar.ends_with("workmate-sidecar") || b.sidecar.ends_with("workmate-sidecar.exe")
@@ -178,7 +185,7 @@ mod tests {
     fn a_missing_engine_fails_before_the_sidecar_is_ever_spawned() {
         let runtime = Runtime::default();
         let err = runtime
-            .start(&Binaries::in_dir(Path::new("/nonexistent")), no_ops())
+            .start(&Binaries::in_dir(Path::new("/nonexistent"), Path::new("/h")), no_ops())
             .expect_err("must fail");
         assert!(matches!(err, RuntimeError::Engine(EngineError::BinaryMissing(_))));
         assert!(runtime.address().expect("address").is_none());
@@ -203,5 +210,38 @@ mod tests {
 
         runtime.shutdown().expect("shutdown");
         assert!(runtime.address().expect("address").is_none());
+    }
+
+    /// The whole chain with nothing faked: Rust -> real sidecar -> real engine
+    /// and back. `models.list` needs no key, so it proves the command pipe, the
+    /// orchestration graph's wiring and the engine connection in one go.
+    #[test]
+    fn a_command_goes_through_the_real_sidecar_to_the_real_engine_and_back() {
+        let binaries = bundled();
+        if !binaries.engine.exists() || !binaries.sidecar.exists() {
+            eprintln!("skipping: run `pnpm sidecar:fetch && pnpm sidecar:build`");
+            return;
+        }
+        let _serial = crate::engine::REAL_ENGINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let runtime = Runtime::default();
+        runtime.start(&binaries, no_ops()).expect("runtime should start");
+        let commander = runtime.commander().expect("lock").expect("sidecar is up");
+        let timeout = std::time::Duration::from_secs(20);
+
+        // Wiring happens just after `ready`; a command sent in that window is
+        // answered with a clear "premature" error rather than hanging, so retry.
+        let mut models = commander.command("models.list", &serde_json::json!({}), timeout);
+        for _ in 0..20 {
+            if models.is_ok() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            models = commander.command("models.list", &serde_json::json!({}), timeout);
+        }
+        assert!(models.expect("models.list").is_array(), "the engine answered with a provider list");
+
+        let err = commander.command("run.get", &serde_json::json!({"runId": "run_nope"}), timeout);
+        assert!(err.is_err(), "an unknown run is a clean error, not a hang");
+        let missing = commander.command("no.such.command", &serde_json::json!({}), timeout).unwrap_err();
+        assert!(missing.contains("unknown or premature command"), "{missing}");
+        runtime.shutdown().expect("shutdown");
     }
 }

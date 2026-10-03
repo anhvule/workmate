@@ -139,7 +139,7 @@ export const wire = async (
     newId: (prefix) => `${prefix}_${randomBytes(16).toString("hex")}`,
   });
   state.mcp = mcp;
-  state.commands = commands({ orch, db, engine });
+  state.commands = commands({ orch, db, engine, models: () => client.providers() });
 };
 
 /** Wire the message loop to the real process streams. */

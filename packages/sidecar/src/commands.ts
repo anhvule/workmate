@@ -39,7 +39,13 @@ const parseAutomation = (raw: unknown): { id: string; fireId: string } | undefin
   return { id: str(o, "id"), fireId: str(o, "fireId") };
 };
 
-export const commands = (deps: { orch: Orchestrator; db: DbClient; engine: EnginePort }): Record<string, Command> => {
+export const commands = (deps: {
+  orch: Orchestrator;
+  db: DbClient;
+  engine: EnginePort;
+  /** Providers and models the engine knows; absent in tests. */
+  models?: () => Promise<unknown>;
+}): Record<string, Command> => {
   const { orch, db, engine } = deps;
   const ws = (a: Record<string, unknown>): { workspaceId: string; runId: string } => ({
     workspaceId: str(a, "workspaceId"),
@@ -68,6 +74,7 @@ export const commands = (deps: { orch: Orchestrator; db: DbClient; engine: Engin
       void run.say(str(a, "text")).catch(() => undefined);
     },
     // The persisted run, ordered by Rust; the UI feeds it to `runTimeline`.
+    "models.list": async () => (deps.models ? await deps.models() : []),
     "run.get": async (a) => {
       const rows = await db.call("run.load", { id: str(a, "runId") });
       if (rows.length === 0) throw new Error("no such run");

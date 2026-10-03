@@ -98,6 +98,16 @@ export class OpenCodeClient {
     });
   }
 
+  /** Providers and their models, as the engine currently knows them. */
+  async providers(): Promise<{ id: string; name: string; models: { id: string; name: string }[] }[]> {
+    const raw = await this.request<{ providers?: { id: string; name?: string; models?: Record<string, { id?: string; name?: string }> }[] }>("/config/providers");
+    return (raw.providers ?? []).map((p) => ({
+      id: p.id,
+      name: p.name ?? p.id,
+      models: Object.entries(p.models ?? {}).map(([key, m]) => ({ id: m.id ?? key, name: m.name ?? key })),
+    }));
+  }
+
   /** The prior session's turns — the raw material `composeHandoff` reads. */
   listMessages(sessionId: string, directory: string): Promise<unknown[]> {
     const q = new URLSearchParams({ directory });

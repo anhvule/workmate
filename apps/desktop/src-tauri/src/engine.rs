@@ -80,10 +80,25 @@ pub fn generate_password() -> String {
     })
 }
 
+/// Where the engine keeps its auth file inside its private home.
+fn auth_file(home: &Path) -> PathBuf {
+    home.join("data").join("opencode").join("auth.json")
+}
+
+/// Remove the key file the engine writes when it is given a credential.
+///
+/// Keys live in the OS keychain; the engine is handed one for the length of its
+/// run and persists it to this file. It is deleted before launch (a crash may
+/// have left one) and after stop, so a key is never at rest in workmate's data.
+fn wipe_auth(home: &Path) {
+    let _ = std::fs::remove_file(auth_file(home));
+}
+
 #[derive(Debug)]
 pub struct Engine {
     child: Child,
     address: EngineAddress,
+    home: PathBuf,
 }
 
 impl Engine {
@@ -92,14 +107,27 @@ impl Engine {
     /// # Errors
     /// Returns [`EngineError`] if the binary is missing, cannot be spawned,
     /// exits during startup, or never announces an address.
-    pub fn start(binary: &Path) -> Result<Self, EngineError> {
+    pub fn start(binary: &Path, home: &Path) -> Result<Self, EngineError> {
         if !binary.exists() {
             return Err(EngineError::BinaryMissing(binary.to_path_buf()));
         }
         let password = generate_password();
+        for d in ["data", "config", "cache", "state"] {
+            std::fs::create_dir_all(home.join(d))?;
+        }
+        wipe_auth(home);
 
+        // Private XDG directories: left alone, the engine would read and write
+        // the user's own OpenCode data, config and credentials. `--port 0` makes
+        // the engine take its preferred port if free and any free one if not, so
+        // it never collides with an OpenCode the user already has running; the
+        // announced address is what readiness trusts either way.
         let mut child = Command::new(binary)
-            .args(["serve", "--hostname", "127.0.0.1"])
+            .args(["serve", "--hostname", "127.0.0.1", "--port", "0"])
+            .env("XDG_DATA_HOME", home.join("data"))
+            .env("XDG_CONFIG_HOME", home.join("config"))
+            .env("XDG_CACHE_HOME", home.join("cache"))
+            .env("XDG_STATE_HOME", home.join("state"))
             .env("OPENCODE_SERVER_PASSWORD", &password)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -136,6 +164,7 @@ impl Engine {
         Ok(Self {
             child,
             address: EngineAddress { base_url, password },
+            home: home.to_path_buf(),
         })
     }
 
@@ -151,6 +180,7 @@ impl Engine {
     pub fn stop(&mut self) -> Result<(), EngineError> {
         self.child.kill()?;
         let _ = self.child.wait();
+        wipe_auth(&self.home);
         Ok(())
     }
 }
@@ -273,7 +303,7 @@ mod tests {
 
     #[test]
     fn a_missing_binary_is_reported_as_such_rather_than_as_a_spawn_failure() {
-        let err = Engine::start(Path::new("/nonexistent/opencode")).expect_err("must fail");
+        let err = Engine::start(Path::new("/nonexistent/opencode"), Path::new("/h")).expect_err("must fail");
         assert!(matches!(err, EngineError::BinaryMissing(_)));
     }
 
@@ -303,7 +333,19 @@ mod tests {
             return;
         }
         let _serial = REAL_ENGINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let engine = Engine::start(&binary).expect("engine should start");
+        let home = std::env::temp_dir().join(crate::ids::new_id("engine-home"));
+        std::fs::create_dir_all(auth_file(&home).parent().unwrap()).unwrap();
+        std::fs::write(auth_file(&home), "{\"left\":\"behind\"}").unwrap();
+        let mut engine = Engine::start(&binary, &home).expect("engine should start");
+        assert!(!auth_file(&home).exists(), "a key left by a crash is wiped before launch");
+        let port: u16 = engine.address().base_url.rsplit(':').next().unwrap().parse().unwrap();
+        assert!(port > 0, "the announced address is a real port");
+        std::fs::write(auth_file(&home), "{\"anthropic\":{\"key\":\"k\"}}").unwrap();
+        engine.stop().unwrap();
+        assert!(!auth_file(&home).exists(), "a key is not left at rest after the engine stops");
+        assert!(home.join("data").is_dir(), "the engine lives in its own home");
+        let _ = std::fs::remove_dir_all(&home);
+        let engine = Engine::start(&binary, &std::env::temp_dir().join(crate::ids::new_id("engine-home"))).expect("engine should start");
         let addr = engine.address();
         assert!(addr.base_url.starts_with("http://127.0.0.1:"));
         assert_eq!(addr.password.len(), 64);

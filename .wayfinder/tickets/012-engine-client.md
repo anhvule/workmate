@@ -73,3 +73,21 @@ deferral including underflow.
 and a typed event union, which is a session's work on its own. The window
 shutdown hook is wired but currently fires on `Destroyed`; ticket 023 should move
 it to `ExitRequested` proper as part of handling the stream lifecycle.
+
+### Addendum — the engine was reading the user's own OpenCode directories
+
+Found while building the app shell: launched bare, the bundled engine used
+`~/.local/share/opencode` — the same data, config and **auth file** as any
+OpenCode the user already runs. Provisioning a key would have written it into
+their personal OpenCode credentials, and their global config would have shaped
+workmate's runs. Fixed in `engine.rs`:
+
+- The engine runs in a private home under workmate's data directory
+  (`XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`).
+- The engine persists any credential it is handed to `auth.json`. That file is
+  deleted before launch (a crash may have left one) and after stop, so a key
+  lives in the OS keychain at rest and on disk only while the engine runs.
+- `--port 0`: the engine keeps its preferred port when free and takes any free
+  one otherwise, so it cannot collide with an OpenCode the user has running.
+- The collision was also the cause of the flaky real-engine tests: two engines
+  sharing one on-disk home.

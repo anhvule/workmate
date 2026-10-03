@@ -77,6 +77,8 @@ export type Phase = "running" | "paused" | "blocked" | "done" | "archived";
 export type RunEvent =
   | { name: "run.started"; payload: { runId: string; roles: string[]; solo: boolean } }
   | { name: "run.changed"; payload: { runId: string; phase: Phase } }
+  /** A role's session exists. Lets the UI name who is asking when the engine prompts. */
+  | { name: "run.session.opened"; payload: { runId: string; workspaceId: string; sessionId: string; roleId: string; role: string } }
   | { name: "run.turn"; payload: { runId: string; sessionId: string; role: string; text: string } }
   | { name: "run.handoff.proposed"; payload: { runId: string; from: string; to: string; context: string; editable: boolean } }
   | { name: "run.handoff.delivered"; payload: { runId: string; from: string; to: string; context: string } }
@@ -306,6 +308,10 @@ export class Run {
       roleId: role.id,
       directory: this.worktree.path,
       engineVersion: ENGINE_VERSION,
+    });
+    this.deps.emit({
+      name: "run.session.opened",
+      payload: { runId: this.id, workspaceId: this.input.workspaceId, sessionId: id, roleId: role.id, role: role.name },
     });
     return id as SessionId;
   }

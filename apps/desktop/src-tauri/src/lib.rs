@@ -22,6 +22,7 @@ pub mod packs;
 pub mod permissions;
 pub mod repo;
 pub mod runtime;
+pub mod settings;
 pub mod sidecar;
 pub mod skills;
 pub mod team;
@@ -381,6 +382,18 @@ fn spawn_scheduler(app: tauri::AppHandle) {
             }
         }
     });
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn settings_default_model(db: tauri::State<'_, db::Db>) -> Result<settings::DefaultModel, String> {
+    settings::default_model(&db).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn settings_set_default_model(db: tauri::State<'_, db::Db>, provider: String, model: String) -> Result<(), String> {
+    settings::set_default_model(&db, &provider, &model)
 }
 
 /// A workspace's runs, newest first. Read straight from Rust's own store, so the
@@ -833,6 +846,7 @@ pub fn run() {
             spawn_scheduler(app.handle().clone());
             app.manage(runtime::Binaries::in_dir(
                 &app.path().resolve("binaries", tauri::path::BaseDirectory::Resource)?,
+                &dir.join("engine"),
             ));
             Ok(())
         })
@@ -865,6 +879,8 @@ pub fn run() {
             automation_history,
             automation_mark_seen,
             automation_unseen,
+            settings_default_model,
+            settings_set_default_model,
             run_list,
             run_get,
             run_reveal_worktree,

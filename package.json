@@ -17,13 +17,18 @@
     "sidecar:fetch": "node scripts/fetch-sidecar-binary.mjs",
     "opencode:types": "node scripts/generate-opencode-types.mjs",
     "opencode:types:check": "node scripts/generate-opencode-types.mjs --check",
-    "sidecar:build": "node scripts/build-sidecar.mjs"
+    "sidecar:build": "node scripts/build-sidecar.mjs",
+    "test:e2e": "WORKMATE_E2E=1 vitest run packages/sidecar/src/engine.e2e.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/node": "^26.6.2",
     "esbuild": "^0.28.2",
     "eslint": "^9",
+    "jsdom": "^30.1.1",
     "typescript": "^5.7",
     "typescript-eslint": "^8",
     "vitest": "^3"

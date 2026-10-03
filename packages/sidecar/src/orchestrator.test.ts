@@ -106,6 +106,17 @@ describe("a one-role run", () => {
     expect(h.ops.filter((o) => o.op === "run.setState").at(-1)?.args["state"]).toBe("done");
   });
 
+  it("announces each session with its role, so a permission prompt can name who is asking", async () => {
+    const h = harness();
+    const { runId } = await h.orch.start({ workspaceId: ws, objective: "x", roles: [role("planner"), role("coder")] });
+    await h.orch.get(runId).finished;
+    const opened = h.events.filter((e) => e.name === "run.session.opened").map((e) => e.payload);
+    expect(opened).toEqual([
+      { runId, workspaceId: "ws_1", sessionId: "s1", roleId: "planner", role: "planner" },
+      { runId, workspaceId: "ws_1", sessionId: "s2", roleId: "coder", role: "coder" },
+    ]);
+  });
+
   it("creates the worktree before the run row, and the session inside that worktree", async () => {
     const h = harness();
     const { runId } = await h.orch.start({ workspaceId: ws, objective: "x", roles: [role("coder")] });

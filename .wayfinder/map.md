@@ -187,6 +187,14 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   never overwriting. Skills install where the engine looks, are SHA-256 checked
   so edits are never silently replaced, and sync over a hardened `git` shell-out
   from sources the user adds. Teams got real CRUD along the way.
+- [First run](tickets/022-first-run.md) — asks for a folder and nothing else; solo
+  is the default with the team one click away; the key, model and git are asked
+  for in place at the first message, when the reason is obvious.
+- [The application shell](tickets/029-application-shell.md) — the screens were a
+  missing ticket. Five tabs, no webview persistence, a solo run that is a chat by
+  construction, an editable handoff, in-place recovery from blocks. Building it
+  found that the engine was reading the user's own OpenCode directories (now
+  isolated; see ticket 012) and that light mode never applied (fixed).
 
 ## Not yet specified
 

@@ -221,6 +221,13 @@ CREATE TABLE skill_install (
 );
 ";
 
+/// The model a role falls back to when it names none (ticket 022). Credential
+/// and model are separate choices; this is only the model half.
+const V6: &str = r"
+ALTER TABLE app_settings ADD COLUMN default_provider TEXT;
+ALTER TABLE app_settings ADD COLUMN default_model TEXT;
+";
+
 const LADDER: &[Migration] = &[
     Migration {
         version: 1,
@@ -246,6 +253,11 @@ const LADDER: &[Migration] = &[
         version: 5,
         name: "skill catalog",
         sql: V5,
+    },
+    Migration {
+        version: 6,
+        name: "default model",
+        sql: V6,
     },
 ];
 

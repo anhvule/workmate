@@ -1,17 +1,120 @@
 @import "tailwindcss";
 
-@theme {
-  --color-ground: oklch(0.99 0 0);
-  --color-ink: oklch(0.24 0.01 260);
-  --color-muted: oklch(0.54 0.01 260);
-  --color-edge: oklch(0.92 0.005 260);
+/*
+ * Tokens live on :root so the dark variant is a real media query. (A @theme
+ * block inside @media is hoisted by Tailwind and applies unconditionally, so
+ * light mode would never show.) @theme then only aliases them for utilities.
+ */
+:root {
+  --ground: oklch(0.985 0.002 260);
+  --panel: oklch(0.965 0.004 260);
+  --raised: oklch(1 0 0);
+  --ink: oklch(0.24 0.012 260);
+  --muted: oklch(0.52 0.012 260);
+  --edge: oklch(0.91 0.005 260);
+  --accent: oklch(0.52 0.19 268);
+  --accent-soft: oklch(0.95 0.03 268);
+  --on-accent: oklch(1 0 0);
+  --good: oklch(0.55 0.13 150);
+  --warn: oklch(0.62 0.15 70);
+  --warn-soft: oklch(0.96 0.04 85);
+  --danger: oklch(0.55 0.2 25);
+  --danger-soft: oklch(0.96 0.03 25);
+  color-scheme: light dark;
 }
 
 @media (prefers-color-scheme: dark) {
-  @theme {
-    --color-ground: oklch(0.19 0.01 260);
-    --color-ink: oklch(0.95 0.005 260);
-    --color-muted: oklch(0.68 0.01 260);
-    --color-edge: oklch(0.29 0.01 260);
+  :root {
+    --ground: oklch(0.18 0.01 260);
+    --panel: oklch(0.215 0.012 260);
+    --raised: oklch(0.245 0.013 260);
+    --ink: oklch(0.95 0.005 260);
+    --muted: oklch(0.7 0.012 260);
+    --edge: oklch(0.31 0.012 260);
+    --accent: oklch(0.72 0.14 268);
+    --accent-soft: oklch(0.29 0.06 268);
+    --on-accent: oklch(0.18 0.02 268);
+    --good: oklch(0.76 0.14 150);
+    --warn: oklch(0.8 0.14 80);
+    --warn-soft: oklch(0.3 0.05 80);
+    --danger: oklch(0.72 0.17 25);
+    --danger-soft: oklch(0.29 0.06 25);
+  }
+}
+
+@theme inline {
+  --color-ground: var(--ground);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-edge: var(--edge);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+::selection {
+  background: var(--accent-soft);
+}
+button,
+[role="tab"] {
+  cursor: default;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.prose-sm p + p {
+  margin-top: 0.6rem;
+}
+.prose-sm code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  background: var(--panel);
+  border-radius: 4px;
+  padding: 0.05em 0.3em;
+}
+/* A role is the same hue everywhere; only its lightness follows the theme. */
+.role-chip {
+  background: oklch(0.94 0.05 var(--h));
+  color: oklch(0.38 0.12 var(--h));
+}
+.role-chip > .dot {
+  background: oklch(0.6 0.15 var(--h));
+}
+@media (prefers-color-scheme: dark) {
+  .role-chip {
+    background: oklch(0.31 0.06 var(--h));
+    color: oklch(0.88 0.09 var(--h));
+  }
+  .role-chip > .dot {
+    background: oklch(0.75 0.14 var(--h));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
   }
 }
