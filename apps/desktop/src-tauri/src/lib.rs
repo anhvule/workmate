@@ -12,6 +12,7 @@ pub mod engine;
 pub mod ids;
 pub mod migrations;
 pub mod permissions;
+pub mod repo;
 pub mod runtime;
 pub mod sidecar;
 pub mod workspace;
@@ -211,6 +212,96 @@ fn permission_ruleset(
     permissions::ruleset(&db, &ws, &worktree).map_err(|e| e.to_string())
 }
 
+/// Where run worktrees live: workmate's data directory, never the user's tree.
+fn worktree_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager as _;
+    app.path().app_data_dir().map(|d| d.join("worktrees")).map_err(|e| e.to_string())
+}
+
+/// The checkout a workspace is bound to, if it is a git repository.
+fn checkout_of(db: &db::Db, workspace_id: &str) -> Result<workspace::Workspace, String> {
+    let ws = workspace::open(db, workspace_id).map_err(|e| e.to_string())?;
+    if repo::is_repo(&ws.directory) {
+        Ok(ws)
+    } else {
+        Err(repo::RepoError::NotARepo(ws.directory).to_string())
+    }
+}
+
+/// Whether the workspace's folder is a git repository, so the UI can offer runs.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn repo_available(db: tauri::State<'_, db::Db>, workspace_id: String) -> Result<bool, String> {
+    let ws = workspace::open(&db, &workspace_id).map_err(|e| e.to_string())?;
+    Ok(repo::is_repo(&ws.directory))
+}
+
+/// Make the branch and worktree for a run. Workmate creates these; an agent
+/// never does (ticket 007).
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn run_worktree_create(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+    run_id: String,
+) -> Result<repo::Worktree, String> {
+    let ws = checkout_of(&db, &workspace_id)?;
+    let path = repo::worktree_path(&worktree_root(&app)?, &workspace_id, &run_id);
+    repo::create_worktree(&ws.directory, &path, &run_id).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn run_status(
+    app: tauri::AppHandle,
+    workspace_id: String,
+    run_id: String,
+) -> Result<Vec<repo::Change>, String> {
+    let path = repo::worktree_path(&worktree_root(&app)?, &workspace_id, &run_id);
+    repo::status(&path).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn run_diff(
+    app: tauri::AppHandle,
+    workspace_id: String,
+    run_id: String,
+    base: String,
+) -> Result<repo::RunDiff, String> {
+    let path = repo::worktree_path(&worktree_root(&app)?, &workspace_id, &run_id);
+    repo::diff(&path, &base).map_err(|e| e.to_string())
+}
+
+/// Merge a run into the user's checkout. Only ever invoked by the user's
+/// explicit action; it refuses on a dirty checkout or any conflict.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn run_merge(
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+    run_id: String,
+) -> Result<repo::MergeOutcome, String> {
+    let ws = checkout_of(&db, &workspace_id)?;
+    repo::merge(&ws.directory, &run_id).map_err(|e| e.to_string())
+}
+
+/// Remove a run's worktree. `abandon` also deletes the branch; `force` is the
+/// only way to discard uncommitted work.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn run_worktree_remove(
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+    run_id: String,
+    abandon: bool,
+    force: bool,
+) -> Result<(), String> {
+    let ws = checkout_of(&db, &workspace_id)?;
+    repo::remove_worktree(&ws.directory, &run_id, abandon, force).map_err(|e| e.to_string())
+}
+
 /// # Panics
 /// Panics if the Tauri runtime cannot start, or if the database cannot be
 /// opened or migrated — neither is recoverable, and continuing without
@@ -242,7 +333,13 @@ pub fn run() {
             permission_add,
             permission_revoke,
             permission_reply,
-            permission_ruleset
+            permission_ruleset,
+            repo_available,
+            run_worktree_create,
+            run_status,
+            run_diff,
+            run_merge,
+            run_worktree_remove
         ])
         .on_window_event(|window, event| {
             // `ExitRequested`, never `Exit`: by the time `Exit` fires the

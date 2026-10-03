@@ -144,6 +144,11 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   is the policy — the user's checkout readable but never writable, the worktree
   writable, `.git/` and `git push` unreachable by any grant. Bash allowances are
   not storable at all, so "push always asks" holds by construction.
+- [Git worktrees and the repo surface](tickets/016-git-worktrees.md) — a run gets
+  `workmate/run-<id>` in a worktree under workmate's data dir, addressed by ids
+  rather than paths. Merge is explicit and computed in memory first, so a conflict
+  changes nothing; archive keeps the branch, abandon deletes it, and neither
+  discards uncommitted work without `force`.
 
 ## Not yet specified
 
