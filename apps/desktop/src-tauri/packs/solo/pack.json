@@ -1,0 +1,17 @@
+{
+  "id": "solo",
+  "name": "Solo builder",
+  "description": "One agent, plain chat. The default for small tasks, and what every other pack degrades to.",
+  "team": {
+    "name": "Solo",
+    "roles": [
+      {
+        "id": "builder",
+        "name": "Builder",
+        "systemPrompt": "You are a careful software engineer working in the user's repository. Read the relevant code before changing it, make the smallest change that solves the problem, run the project's tests when you can, and say plainly what you did and what you did not verify. Commit your work in small, conventional-commit steps.",
+        "toolAllowlist": []
+      }
+    ]
+  },
+  "files": [{ "path": "AGENTS.md", "from": "AGENTS.md" }]
+}

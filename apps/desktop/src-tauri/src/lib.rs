@@ -18,10 +18,13 @@ pub mod mcp;
 pub mod memory;
 pub mod migrations;
 pub mod ops;
+pub mod packs;
 pub mod permissions;
 pub mod repo;
 pub mod runtime;
 pub mod sidecar;
+pub mod skills;
+pub mod team;
 pub mod workspace;
 
 use std::path::PathBuf;
@@ -380,6 +383,168 @@ fn spawn_scheduler(app: tauri::AppHandle) {
     });
 }
 
+/// A directory shipped with the app, or the source tree's copy when running
+/// from `tauri dev`, where resources are not staged.
+fn shipped_dir(app: &tauri::AppHandle, name: &str) -> PathBuf {
+    use tauri::Manager as _;
+    app.path()
+        .resolve(name, tauri::path::BaseDirectory::Resource)
+        .ok()
+        .filter(|p| p.is_dir())
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(name))
+}
+
+fn skill_cache(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager as _;
+    app.path().app_data_dir().map(|d| d.join("skill-sources")).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn team_list(db: tauri::State<'_, db::Db>) -> Result<Vec<team::Team>, String> {
+    team::list(&db).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn team_create(db: tauri::State<'_, db::Db>, name: String, roles: Vec<team::Role>) -> Result<team::Team, String> {
+    team::create(&db, &name, &roles).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn team_update_role(db: tauri::State<'_, db::Db>, role: team::Role) -> Result<(), String> {
+    team::update_role(&db, &role).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn team_remove(db: tauri::State<'_, db::Db>, id: String) -> Result<(), String> {
+    team::remove(&db, &id).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn pack_list(app: tauri::AppHandle) -> Vec<packs::Pack> {
+    packs::load_all(&shipped_dir(&app, "packs")).into_iter().map(|(p, _)| p).collect()
+}
+
+fn find_pack(app: &tauri::AppHandle, id: &str) -> Result<(packs::Pack, PathBuf), String> {
+    packs::load_all(&shipped_dir(app, "packs"))
+        .into_iter()
+        .find(|(p, _)| p.id == id)
+        .ok_or_else(|| packs::PackError::Unknown(id.to_owned()).to_string())
+}
+
+/// What applying a pack would write, so the user can see before agreeing.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn pack_preview(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, db::Db>,
+    pack_id: String,
+    workspace_id: String,
+) -> Result<packs::Preview, String> {
+    let (pack, _) = find_pack(&app, &pack_id)?;
+    let ws = workspace::open(&db, &workspace_id).map_err(|e| e.to_string())?;
+    packs::preview(&pack, &ws.directory).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn pack_apply(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, db::Db>,
+    pack_id: String,
+    workspace_id: String,
+) -> Result<packs::Applied, String> {
+    let (pack, dir) = find_pack(&app, &pack_id)?;
+    let ws = workspace::open(&db, &workspace_id).map_err(|e| e.to_string())?;
+    packs::apply(&db, &dir, &pack, &ws).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn skill_catalog(app: tauri::AppHandle, db: tauri::State<'_, db::Db>) -> Result<Vec<skills::Entry>, String> {
+    skills::catalog(&db, &shipped_dir(&app, "skills"), &skill_cache(&app)?).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn skill_installed(db: tauri::State<'_, db::Db>, workspace_id: String) -> Result<Vec<skills::Installed>, String> {
+    let ws = workspace::open(&db, &workspace_id).map_err(|e| e.to_string())?;
+    skills::installed(&db, &ws).map_err(|e| e.to_string())
+}
+
+/// Install by `name` and `origin` from the catalog, so the webview never names
+/// a path to copy from.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn skill_install(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+    name: String,
+    origin: String,
+    update: bool,
+    force: bool,
+) -> Result<(), String> {
+    let ws = workspace::open(&db, &workspace_id).map_err(|e| e.to_string())?;
+    let entry = skills::catalog(&db, &shipped_dir(&app, "skills"), &skill_cache(&app)?)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|e| e.name == name && e.origin == origin)
+        .ok_or("that skill is not in the catalog")?;
+    if update {
+        skills::update(&db, &ws, &entry, force)
+    } else {
+        skills::install(&db, &ws, &entry)
+    }
+    .map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn skill_uninstall(
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+    name: String,
+    force: bool,
+) -> Result<(), String> {
+    let ws = workspace::open(&db, &workspace_id).map_err(|e| e.to_string())?;
+    skills::uninstall(&db, &ws, &name, force).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn skill_sources(db: tauri::State<'_, db::Db>) -> Result<Vec<skills::Source>, String> {
+    skills::sources(&db).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn skill_add_source(db: tauri::State<'_, db::Db>, url: String) -> Result<skills::Source, String> {
+    skills::add_source(&db, &url).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn skill_remove_source(app: tauri::AppHandle, db: tauri::State<'_, db::Db>, id: String) -> Result<(), String> {
+    skills::remove_source(&db, &skill_cache(&app)?, &id).map_err(|e| e.to_string())
+}
+
+/// Sync a source. Network and a subprocess, so off the async executor.
+#[tauri::command]
+async fn skill_sync(app: tauri::AppHandle, id: String) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager as _;
+        let cache = skill_cache(&app)?;
+        skills::sync(&app.state::<db::Db>(), &cache, &id).map(|v| v.len()).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Every configured MCP server, for the settings screen.
 #[expect(clippy::needless_pass_by_value)]
 #[tauri::command]
@@ -592,6 +757,21 @@ pub fn run() {
             automation_history,
             automation_mark_seen,
             automation_unseen,
+            team_list,
+            team_create,
+            team_update_role,
+            team_remove,
+            pack_list,
+            pack_preview,
+            pack_apply,
+            skill_catalog,
+            skill_installed,
+            skill_install,
+            skill_uninstall,
+            skill_sources,
+            skill_add_source,
+            skill_remove_source,
+            skill_sync,
             mcp_list,
             mcp_add,
             mcp_set_enabled,

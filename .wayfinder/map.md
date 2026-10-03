@@ -182,6 +182,11 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   machine fires once or records a miss. Unattended runs get a ruleset where every
   ask is a deny, answer `NOTHING_TO_REPORT` to stay quiet, and discard their
   worktree when they do. Findings are kept and unseen until read.
+- [Starter packs and the skills catalog](tickets/020-starter-packs-and-skills.md)
+  — a pack ships a *team* (solo, plan-build-review, docs-pair), previewable and
+  never overwriting. Skills install where the engine looks, are SHA-256 checked
+  so edits are never silently replaced, and sync over a hardened `git` shell-out
+  from sources the user adds. Teams got real CRUD along the way.
 
 ## Not yet specified
 

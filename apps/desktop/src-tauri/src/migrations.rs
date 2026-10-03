@@ -200,6 +200,27 @@ CREATE TABLE automation_fire (
 CREATE INDEX automation_fire_recent ON automation_fire(automation_id, started_at DESC);
 ";
 
+/// Skill catalog (ticket 020). A source is a git repo workmate syncs into its
+/// cache; an install is a skill copied into a workspace, with the checksum it
+/// had when it was copied so local edits are detectable.
+const V5: &str = r"
+CREATE TABLE skill_source (
+    id             TEXT PRIMARY KEY,
+    url            TEXT NOT NULL UNIQUE,
+    last_synced_at INTEGER,
+    created_at     INTEGER NOT NULL
+);
+
+CREATE TABLE skill_install (
+    workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    origin       TEXT NOT NULL,
+    checksum     TEXT NOT NULL,
+    installed_at INTEGER NOT NULL,
+    PRIMARY KEY (workspace_id, name)
+);
+";
+
 const LADDER: &[Migration] = &[
     Migration {
         version: 1,
@@ -220,6 +241,11 @@ const LADDER: &[Migration] = &[
         version: 4,
         name: "automations",
         sql: V4,
+    },
+    Migration {
+        version: 5,
+        name: "skill catalog",
+        sql: V5,
     },
 ];
 
