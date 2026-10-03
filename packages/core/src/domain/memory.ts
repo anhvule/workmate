@@ -95,3 +95,21 @@ export const detachWorkspace = (
     ...m,
     scopes: m.scopes.filter((s) => !(s.kind === "workspace" && s.workspaceId === id)),
   }));
+
+/**
+ * The text injected per turn through the engine's `system` field.
+ *
+ * Empty when there is nothing pinned, so a workspace with no memory pays no
+ * tokens at all. Framed as claims the agent may consult, not instructions, and
+ * pointing at `recall` so the bounded digest is never mistaken for everything
+ * workmate knows.
+ */
+export const renderDigest = (memories: readonly Memory[]): string => {
+  if (memories.length === 0) return "";
+  const lines = memories.map((m) => `- ${m.subject}: ${m.claim}`);
+  return [
+    "Things workmate remembers about this project (claims recorded earlier, newest knowledge wins):",
+    ...lines,
+    "More may be stored. Use the `recall` tool to look something up, and `remember` to record a durable fact.",
+  ].join("\n");
+};

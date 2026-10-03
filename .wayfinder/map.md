@@ -161,6 +161,11 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   `/global/event`, scrubs credentials, tags permission and completion events for
   Rust to act on, and emits `sidecar:<type>` with a gap-detecting `seq`/`epoch`.
   After a reconnect the engine's transcript, not the stream, is the truth.
+- [Memory store, remember and recall](tickets/015-memory-store.md) — Rust stores
+  and guards (no secrets, bounded claims, supersede same-subject-same-scope),
+  TypeScript builds the bounded digest and serves `remember`/`recall` over a
+  token-guarded loopback MCP endpoint that carries run/role identity in its path.
+  Survival across workspace deletion is tested. The panel UI waits on the shell.
 
 ## Not yet specified
 

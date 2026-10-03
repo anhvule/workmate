@@ -11,6 +11,7 @@ pub mod db;
 pub mod engine;
 pub mod events;
 pub mod ids;
+pub mod memory;
 pub mod migrations;
 pub mod ops;
 pub mod permissions;
@@ -235,6 +236,48 @@ fn permission_ruleset(
     permissions::ruleset(&db, &ws, &worktree).map_err(|e| e.to_string())
 }
 
+/// Memories for the panel, with their history when asked. Narrowest scope first.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn memory_list(
+    db: tauri::State<'_, db::Db>,
+    include_superseded: bool,
+) -> Result<Vec<serde_json::Value>, String> {
+    memory::list(&db, &serde_json::json!({"includeSuperseded": include_superseded}))
+}
+
+/// Correct a memory in place. The same guards as `remember` apply.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn memory_update(
+    db: tauri::State<'_, db::Db>,
+    id: String,
+    subject: Option<String>,
+    claim: Option<String>,
+    pinned: Option<bool>,
+) -> Result<(), String> {
+    memory::update(&db, &serde_json::json!({"id": id, "subject": subject, "claim": claim, "pinned": pinned}))
+        .map(|_| ())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn memory_delete(db: tauri::State<'_, db::Db>, id: String) -> Result<(), String> {
+    memory::delete(&db, &serde_json::json!({"id": id})).map(|_| ())
+}
+
+/// The read-only markdown view of everything workmate remembers.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn memory_export(db: tauri::State<'_, db::Db>) -> Result<String, String> {
+    let rows = memory::export_markdown(&db)?;
+    Ok(rows
+        .first()
+        .and_then(|r| r["markdown"].as_str())
+        .unwrap_or_default()
+        .to_owned())
+}
+
 /// Where run worktrees live: workmate's data directory, never the user's tree.
 fn worktree_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager as _;
@@ -362,7 +405,11 @@ pub fn run() {
             run_status,
             run_diff,
             run_merge,
-            run_worktree_remove
+            run_worktree_remove,
+            memory_list,
+            memory_update,
+            memory_delete,
+            memory_export
         ])
         .on_window_event(|window, event| {
             // `ExitRequested`, never `Exit`: by the time `Exit` fires the

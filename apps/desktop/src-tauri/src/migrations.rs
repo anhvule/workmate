@@ -144,11 +144,22 @@ CREATE TABLE app_settings (
 INSERT INTO app_settings (id) VALUES (1);
 ";
 
-const LADDER: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial schema",
-    sql: V1,
-}];
+/// Memory staleness (ticket 006): a "last used" stamp, set whenever `recall`
+/// returns a memory, so the panel can show what is never consulted.
+const V2: &str = "ALTER TABLE memory ADD COLUMN last_used_at INTEGER;";
+
+const LADDER: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial schema",
+        sql: V1,
+    },
+    Migration {
+        version: 2,
+        name: "memory last-used stamp",
+        sql: V2,
+    },
+];
 
 /// The version the code in this binary expects.
 #[must_use]

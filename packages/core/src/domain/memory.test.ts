@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { memoryId, roleId, runId, workspaceId } from "./ids.js";
 import { forRole, forWorkspace, GLOBAL, resolutionOrder } from "./scope.js";
-import { buildDigest, detachWorkspace, selectMemories, type Memory } from "./memory.js";
+import { buildDigest, detachWorkspace, renderDigest, selectMemories, type Memory } from "./memory.js";
 
 const ws = workspaceId("ws-1");
 const other = workspaceId("ws-2");
@@ -72,5 +72,17 @@ describe("detachWorkspace", () => {
     const after = detachWorkspace([m], ws);
     expect(after[0]?.scopes).toEqual([]);
     expect(after).toHaveLength(1);
+  });
+});
+
+describe("renderDigest", () => {
+  it("costs nothing when nothing is pinned", () => {
+    expect(renderDigest([])).toBe("");
+  });
+
+  it("lists each claim and points at recall rather than claiming to be complete", () => {
+    const text = renderDigest([mem("a", { subject: "build", claim: "uses pnpm" })]);
+    expect(text).toContain("- build: uses pnpm");
+    expect(text).toContain("`recall`");
   });
 });

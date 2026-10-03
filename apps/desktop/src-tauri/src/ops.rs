@@ -9,6 +9,7 @@ use rusqlite::params;
 use serde_json::{json, Value};
 
 use crate::db::{now_ms, Db};
+use crate::memory;
 
 type Rows = Result<Vec<Value>, String>;
 
@@ -170,6 +171,12 @@ pub fn dispatch(db: &Db, op: &str, args: &Value) -> Rows {
         "session.record" => session_record(db, args),
         "handoff.append" => handoff_append(db, args),
         "run.load" => run_load(db, args),
+        "memory.remember" => memory::remember(db, args),
+        "memory.list" => memory::list(db, args),
+        "memory.recall" => memory::recall(db, args),
+        "memory.update" => memory::update(db, args),
+        "memory.delete" => memory::delete(db, args),
+        "memory.export" => memory::export_markdown(db),
         other => Err(format!("unknown operation `{other}`")),
     }
 }
