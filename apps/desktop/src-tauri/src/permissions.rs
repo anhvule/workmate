@@ -35,6 +35,8 @@ pub enum PermissionError {
     UnknownSource(String),
     #[error("{0} is not a usable path: workmate needs UTF-8")]
     NotUtf8(PathBuf),
+    #[error("{0} contains `*` or `?`, which the engine cannot match literally; rename the folder or grant its parent")]
+    GlobMetacharacter(PathBuf),
     #[error(transparent)]
     Db(#[from] DbError),
 }
@@ -174,6 +176,11 @@ pub fn grant(
     source: Source,
 ) -> Result<Grant, PermissionError> {
     let text = path_text(path).ok_or_else(|| PermissionError::NotUtf8(path.to_owned()))?;
+    // A grant is an explicit act, so a path the engine would match more widely
+    // than the user meant is refused rather than quietly widened (ticket 027).
+    if text.contains(['*', '?']) {
+        return Err(PermissionError::GlobMetacharacter(path.to_owned()));
+    }
     let g = Grant {
         id: new_id("pg"),
         workspace_id: workspace_id.to_owned(),
@@ -283,9 +290,23 @@ fn rule(permission: &str, pattern: impl Into<String>, action: Action) -> Rule {
     }
 }
 
+/// A path as a glob that matches that path and, as nearly as the engine allows,
+/// nothing else.
+///
+/// The engine turns `*` into `.*` and `?` into `.` and regex-escapes everything
+/// else, so `[ ] { } ( )` are already literal — but there is no way to escape
+/// `*` or `?` (checked against the pinned `1.18.32` matcher). The tightest
+/// available spelling of either is `?`: a single-character wildcard instead of
+/// an unbounded one. That still matches one stray character at that position,
+/// which is why [`grant`] refuses such paths outright; only paths workmate
+/// did not choose (the workspace root, the worktree) reach here with one.
+fn literal(p: &str) -> String {
+    p.replace('*', "?")
+}
+
 /// `<p>/**`, without doubling the separator when `p` is a root.
 fn under(p: &Path) -> String {
-    format!("{}/**", p.to_string_lossy().trim_end_matches('/'))
+    format!("{}/**", literal(p.to_string_lossy().trim_end_matches('/')))
 }
 
 /// Compile a policy into the ordered ruleset the engine evaluates.
@@ -322,7 +343,7 @@ pub fn compile(root: &Path, worktree: &Path, grants: &[Grant]) -> Vec<Rule> {
     for g in grants {
         // Both forms, so one grant covers a named file and a named directory
         // without the caller having to say which it meant.
-        rules.push(rule(g.operation.as_str(), g.path.to_string_lossy().into_owned(), Action::Allow));
+        rules.push(rule(g.operation.as_str(), literal(&g.path.to_string_lossy()), Action::Allow));
         rules.push(rule(g.operation.as_str(), under(&g.path), Action::Allow));
     }
     // The hard denies, last, so no grant above can outrank them.
@@ -344,6 +365,25 @@ mod tests {
             directory: PathBuf::from(root),
             created_at: 0,
         }
+    }
+
+    /// The engine's matcher, reproduced from the pinned binary: `*` -> `.*`,
+    /// `?` -> `.`, every other regex metacharacter escaped, anchored, dotall.
+    fn engine_matches(pattern: &str, target: &str) -> bool {
+        let mut re = String::from("(?s)^");
+        for ch in pattern.chars() {
+            match ch {
+                '*' => re.push_str(".*"),
+                '?' => re.push('.'),
+                c if ".+^${}()|[]\\".contains(c) => {
+                    re.push('\\');
+                    re.push(c);
+                }
+                c => re.push(c),
+            }
+        }
+        re.push('$');
+        regex::Regex::new(&re).expect("valid").is_match(target)
     }
 
     fn a_grant(path: &str, operation: Operation) -> Grant {
@@ -550,5 +590,51 @@ mod tests {
             rules.iter().all(|r| !r.pattern.starts_with("/elsewhere")),
             "one workspace's grant must not leak into another's ruleset",
         );
+    }
+
+    #[test]
+    fn brackets_and_braces_in_a_folder_name_stay_literal() {
+        let rules = compile(Path::new("/p/foo[1]"), Path::new("/wt"), &[]);
+        let root = rules.iter().find(|r| r.permission == "read" && r.pattern.contains("foo")).unwrap();
+        assert!(engine_matches(&root.pattern, "/p/foo[1]/src/a.rs"));
+        assert!(!engine_matches(&root.pattern, "/p/foo1/src/a.rs"), "[1] must not become a class");
+    }
+
+    #[test]
+    fn a_star_in_a_folder_name_cannot_swallow_its_siblings() {
+        let rules = compile(Path::new("/p/report*"), Path::new("/wt"), &[]);
+        let root = rules.iter().find(|r| r.permission == "read" && r.pattern.contains("report")).unwrap();
+        assert!(engine_matches(&root.pattern, "/p/report*/a.txt"));
+        assert!(!engine_matches(&root.pattern, "/p/report_final/a.txt"));
+        assert!(!engine_matches(&root.pattern, "/p/reports-2024/a.txt"));
+    }
+
+    #[test]
+    fn a_question_mark_widens_by_one_character_and_no_more() {
+        let rules = compile(Path::new("/p/draft?"), Path::new("/wt"), &[]);
+        let root = rules.iter().find(|r| r.permission == "read" && r.pattern.contains("draft")).unwrap();
+        assert!(engine_matches(&root.pattern, "/p/draft?/a.txt"));
+        assert!(!engine_matches(&root.pattern, "/p/draft-final/a.txt"));
+    }
+
+    #[test]
+    fn the_worktree_rules_are_escaped_too() {
+        let rules = compile(Path::new("/p"), Path::new("/data/we*ird/run"), &[]);
+        let edit = rules.iter().find(|r| r.permission == "edit" && r.pattern.contains("run")).unwrap();
+        assert!(!engine_matches(&edit.pattern, "/data/weird-and-long/run/x"));
+    }
+
+    #[test]
+    fn an_explicit_grant_for_a_glob_looking_path_is_refused() {
+        let db = Db::open_in_memory().unwrap();
+        db.with(|c| c.execute("INSERT INTO workspace (id,name,directory,created_at) VALUES ('w','w','/w',0)", []))
+            .unwrap();
+        for bad in ["/p/a*", "/p/b?"] {
+            assert!(matches!(
+                grant(&db, "w", Path::new(bad), Operation::Read, Source::User),
+                Err(PermissionError::GlobMetacharacter(_))
+            ));
+        }
+        assert!(grant(&db, "w", Path::new("/p/ok[1]"), Operation::Read, Source::User).is_ok());
     }
 }

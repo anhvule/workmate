@@ -153,6 +153,10 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   operations (`run.create`, `handoff.append`, …) and Rust runs the SQL on a
   single in-order pump thread. Calls time out rather than hang, and a reply with
   no waiter stays a fault.
+- [Escape paths that look like globs](tickets/027-escape-globs-in-patterns.md) —
+  the engine's matcher has no escape for `*` or `?`, so they are spelled `?` (one
+  character, not unbounded) and an explicit grant for such a path is refused.
+  Brackets and braces were already literal.
 
 ## Not yet specified
 

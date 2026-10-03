@@ -4603,6 +4603,7 @@ dependencies = [
  "getrandom 0.3.4",
  "git2",
  "keyring",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
