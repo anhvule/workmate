@@ -56,8 +56,8 @@ export interface EnginePort {
     body: { prompt: string; system: string; model?: { providerID: string; modelID: string }; tools?: Record<string, boolean> },
   ): Promise<{ text: string }>;
   listMessages(sessionId: string, directory: string): Promise<readonly Message[]>;
-  /** Point the session's memory tools at this caller. */
-  registerMemoryTools(directory: string, url: string): Promise<void>;
+  /** Register an MCP server for a directory's engine instance. Replaces one of the same name. */
+  registerMcp(directory: string, name: string, config: Record<string, unknown>): Promise<void>;
 }
 
 export interface Worktree {
@@ -88,6 +88,8 @@ export interface Deps {
   readonly emit: (e: RunEvent) => void;
   /** URL of the memory MCP endpoint for one caller. */
   readonly memoryUrl: (ctx: MemoryContext) => string;
+  /** Header the engine must send to the memory endpoint. */
+  readonly memoryAuth: string;
   readonly newId: (prefix: string) => string;
   /** Upper bound on turns running at once. */
   readonly maxConcurrentTurns?: number;
@@ -260,11 +262,37 @@ export class Run {
     return id as SessionId;
   }
 
-  private tools(role: RoleSpec): Record<string, boolean> | undefined {
+  /**
+   * The `tools` map for a turn. An allowlist means *these on, everything else
+   * off*: the engine enables any tool not mentioned, so exclusivity has to be
+   * spelled out — every built-in and every configured MCP server's tools are
+   * set explicitly. A server is named in the allowlist as `name` or `name_*`.
+   * Memory tools are always on: a role that cannot remember is not on the team.
+   */
+  private tools(role: RoleSpec, servers: readonly string[]): Record<string, boolean> | undefined {
     if (role.toolAllowlist.length === 0) return undefined;
-    // An allowlist is "these on, everything else off". The memory tools are
-    // always on: a role that cannot remember is not part of the team.
-    return Object.fromEntries([...role.toolAllowlist, "remember", "recall"].map((t) => [t, true]));
+    const allowed = new Set(role.toolAllowlist);
+    const out: Record<string, boolean> = {};
+    for (const t of BUILTIN_TOOLS) out[t] = allowed.has(t);
+    for (const s of servers) out[`${s}_*`] = allowed.has(s) || allowed.has(`${s}_*`);
+    for (const t of allowed) out[t] = true;
+    for (const t of MEMORY_TOOLS) out[t] = true;
+    return out;
+  }
+
+  /** The user's enabled MCP servers, delivered to the engine before each turn. */
+  private async deliverMcp(ctx: MemoryContext): Promise<string[]> {
+    const configs = (await this.deps.db.call("mcp.configs", { workspaceId: this.input.workspaceId })) as {
+      name: string;
+      config: Record<string, unknown>;
+    }[];
+    for (const c of configs) await this.deps.engine.registerMcp(this.worktree.path, c.name, c.config);
+    await this.deps.engine.registerMcp(this.worktree.path, MEMORY_SERVER, {
+      type: "remote",
+      url: this.deps.memoryUrl(ctx),
+      headers: { authorization: this.deps.memoryAuth },
+    });
+    return configs.map((c) => c.name);
   }
 
   /** One role's turn, retrying on the same session if the engine fails. */
@@ -272,10 +300,10 @@ export class Run {
     const ctx: MemoryContext = { runId: this.id, workspaceId: this.input.workspaceId, roleId: role.id };
     for (;;) {
       try {
-        await this.deps.engine.registerMemoryTools(this.worktree.path, this.deps.memoryUrl(ctx));
+        const servers = await this.deliverMcp(ctx);
         const digest = await this.deps.memory.digestFor(ctx);
         const system = [role.systemPrompt, digest].filter((s) => s.trim() !== "").join("\n\n");
-        const tools = this.tools(role);
+        const tools = this.tools(role, servers);
         const { text } = await this.pool.run(() =>
           this.deps.engine.sendMessage(session, this.worktree.path, {
             prompt,
@@ -373,6 +401,13 @@ export class Run {
     return this.lastSession;
   }
 }
+
+/** The engine's built-in tools, named so an allowlist can switch the rest off. */
+export const BUILTIN_TOOLS = ["bash", "edit", "write", "read", "grep", "glob", "list", "patch", "webfetch", "task", "todowrite", "todoread"] as const;
+
+/** The memory server's name, and the tools it provides as the engine names them. */
+export const MEMORY_SERVER = "workmate-memory";
+export const MEMORY_TOOLS = [`${MEMORY_SERVER}_remember`, `${MEMORY_SERVER}_recall`] as const;
 
 /** The engine version sessions are recorded against; set once from the pin. */
 export const ENGINE_VERSION = "1.18.32";

@@ -171,6 +171,10 @@ pub fn dispatch(db: &Db, op: &str, args: &Value) -> Rows {
         "session.record" => session_record(db, args),
         "handoff.append" => handoff_append(db, args),
         "run.load" => run_load(db, args),
+        // Read-only on purpose: the sidecar can learn what is enabled and can
+        // never register a server, because a local server is a command the
+        // machine will run.
+        "mcp.configs" => crate::mcp::engine_configs(db, args),
         "memory.remember" => memory::remember(db, args),
         "memory.list" => memory::list(db, args),
         "memory.recall" => memory::recall(db, args),

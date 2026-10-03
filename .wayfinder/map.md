@@ -173,6 +173,10 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   fail. Credentials are provisioned to the engine by Rust and never cross the
   pipe. Proven against fakes; the first live model turn will confirm two engine
   assumptions.
+- [MCP server configuration](tickets/018-mcp-servers.md) — servers are scoped to a
+  workspace or global, only the user can add one, tools always ask, and delivery
+  is `POST /mcp` per run so no restart is needed. Role scoping means the
+  allowlist is genuinely exclusive now. Secret-bearing headers are not stored.
 
 ## Not yet specified
 

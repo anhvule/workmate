@@ -116,7 +116,7 @@ export const wire = async (
   const token = randomBytes(24).toString("hex");
   const memory = new MemoryService(db);
   const mcp = await startMcp({ memory, token });
-  const addMcp = async (directory: string, name: string, url: string, bearer: string): Promise<void> => {
+  const addMcp = async (directory: string, name: string, config: Record<string, unknown>): Promise<void> => {
     const q = new URLSearchParams({ directory });
     const res = await fetch(`${addr.baseUrl}/mcp?${q.toString()}`, {
       method: "POST",
@@ -124,17 +124,18 @@ export const wire = async (
         "content-type": "application/json",
         authorization: `Basic ${btoa(`opencode:${addr.password}`)}`,
       },
-      body: JSON.stringify({ name, config: { type: "remote", url, headers: { authorization: `Bearer ${bearer}` } } }),
+      body: JSON.stringify({ name, config }),
     });
     if (!res.ok) throw new Error(`could not register ${name} with the engine: ${res.status}`);
   };
-  const engine = engineAdapter(client, addMcp, token);
+  const engine = engineAdapter(client, addMcp);
   const orch = new Orchestrator({
     db,
     engine,
     memory,
     emit: (e) => emit({ type: "event", name: e.name, payload: e.payload }),
     memoryUrl: (ctx) => mcp.urlFor(ctx),
+    memoryAuth: `Bearer ${token}`,
     newId: (prefix) => `${prefix}_${randomBytes(16).toString("hex")}`,
   });
   state.mcp = mcp;

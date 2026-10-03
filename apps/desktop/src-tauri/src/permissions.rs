@@ -39,6 +39,8 @@ pub enum PermissionError {
     GlobMetacharacter(PathBuf),
     #[error(transparent)]
     Db(#[from] DbError),
+    #[error(transparent)]
+    Mcp(#[from] crate::mcp::McpError),
 }
 
 /// The operations a grant can widen.
@@ -279,7 +281,8 @@ pub fn record_reply(
 /// # Errors
 /// [`PermissionError::Db`] if the grants cannot be read.
 pub fn ruleset(db: &Db, ws: &Workspace, worktree: &Path) -> Result<Vec<Rule>, PermissionError> {
-    Ok(compile(&ws.directory, worktree, &grants(db, &ws.id)?))
+    let servers = crate::mcp::enabled_names(db, &ws.id)?;
+    Ok(compile_with_mcp(&ws.directory, worktree, &grants(db, &ws.id)?, &servers))
 }
 
 fn rule(permission: &str, pattern: impl Into<String>, action: Action) -> Rule {
@@ -320,6 +323,22 @@ fn under(p: &Path) -> String {
 /// stored grant cannot lock a user out of their own project.
 #[must_use]
 pub fn compile(root: &Path, worktree: &Path, grants: &[Grant]) -> Vec<Rule> {
+    compile_with_mcp(root, worktree, grants, &[])
+}
+
+/// [`compile`], plus a floor entry per MCP server: its tools **always ask**.
+///
+/// MCP tools are `<server>_<tool>` and run code workmate did not write, with
+/// reach workmate cannot see. Like `bash`, they cannot be made durable by a
+/// stored grant: the table holds `read` and `edit` only. Whether that is
+/// tolerable in use is ticket 028's question.
+#[must_use]
+pub fn compile_with_mcp(
+    root: &Path,
+    worktree: &Path,
+    grants: &[Grant],
+    mcp_servers: &[String],
+) -> Vec<Rule> {
     let mut rules = vec![
         // The floor.
         rule("read", "**", Action::Ask),
@@ -340,6 +359,9 @@ pub fn compile(root: &Path, worktree: &Path, grants: &[Grant]) -> Vec<Rule> {
         rule("read", under(worktree), Action::Allow),
         rule("edit", under(worktree), Action::Allow),
     ];
+    // Ahead of the widenings and well before the hard denies. Names are
+    // validated to `[a-z0-9_-]`, so none can carry a glob character.
+    rules.splice(3..3, mcp_servers.iter().map(|n| rule(&format!("{n}_*"), "*", Action::Ask)));
     for g in grants {
         // Both forms, so one grant covers a named file and a named directory
         // without the caller having to say which it meant.

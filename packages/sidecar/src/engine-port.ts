@@ -31,8 +31,7 @@ export const messagesFrom = (raw: readonly unknown[]): readonly Message[] =>
 export const engineAdapter = (
   client: OpenCodeClient,
   /** How to register an MCP server with the engine for a directory. */
-  addMcp: (directory: string, name: string, url: string, token: string) => Promise<void>,
-  mcpToken: string,
+  addMcp: (directory: string, name: string, config: Record<string, unknown>) => Promise<void>,
 ): EnginePort => ({
   createSession: (directory, body) => client.createSession(directory, body as never),
   sendMessage: async (sessionId, directory, body) => {
@@ -45,5 +44,5 @@ export const engineAdapter = (
     return { text: textOf(res.parts) };
   },
   listMessages: async (sessionId, directory) => messagesFrom(await client.listMessages(sessionId, directory)),
-  registerMemoryTools: (directory, url) => addMcp(directory, "workmate-memory", url, mcpToken),
+  registerMcp: addMcp,
 });

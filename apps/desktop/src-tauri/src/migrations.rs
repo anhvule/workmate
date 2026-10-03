@@ -148,6 +148,25 @@ INSERT INTO app_settings (id) VALUES (1);
 /// returns a memory, so the panel can show what is never consulted.
 const V2: &str = "ALTER TABLE memory ADD COLUMN last_used_at INTEGER;";
 
+/// MCP server configuration (ticket 018). `workspace_id` NULL means every
+/// workspace. Config is owned by its workspace — unlike memory, a removed
+/// folder's server list has no reason to outlive it.
+const V3: &str = r"
+CREATE TABLE mcp_server (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT REFERENCES workspace(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    kind         TEXT NOT NULL CHECK (kind IN ('local','remote')),
+    command      TEXT NOT NULL DEFAULT '[]',
+    environment  TEXT NOT NULL DEFAULT '{}',
+    url          TEXT,
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    created_at   INTEGER NOT NULL
+);
+-- A name is a tool-name prefix, so it must be unique where it applies.
+CREATE UNIQUE INDEX mcp_server_name ON mcp_server(coalesce(workspace_id, ''), name);
+";
+
 const LADDER: &[Migration] = &[
     Migration {
         version: 1,
@@ -158,6 +177,11 @@ const LADDER: &[Migration] = &[
         version: 2,
         name: "memory last-used stamp",
         sql: V2,
+    },
+    Migration {
+        version: 3,
+        name: "mcp servers",
+        sql: V3,
     },
 ];
 

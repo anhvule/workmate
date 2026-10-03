@@ -12,6 +12,7 @@ pub mod engine;
 pub mod events;
 pub mod host;
 pub mod ids;
+pub mod mcp;
 pub mod memory;
 pub mod migrations;
 pub mod ops;
@@ -281,6 +282,38 @@ fn permission_ruleset(
     permissions::ruleset(&db, &ws, &worktree).map_err(|e| e.to_string())
 }
 
+/// Every configured MCP server, for the settings screen.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn mcp_list(db: tauri::State<'_, db::Db>) -> Result<Vec<mcp::Server>, String> {
+    mcp::list(&db).map_err(|e| e.to_string())
+}
+
+/// Register a server. User-initiated only: a local server is a command this
+/// machine will run, so there is no sidecar route to it.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn mcp_add(
+    db: tauri::State<'_, db::Db>,
+    workspace_id: Option<String>,
+    name: String,
+    transport: mcp::Transport,
+) -> Result<mcp::Server, String> {
+    mcp::add(&db, workspace_id.as_deref(), &name, &transport).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn mcp_set_enabled(db: tauri::State<'_, db::Db>, id: String, enabled: bool) -> Result<(), String> {
+    mcp::set_enabled(&db, &id, enabled).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn mcp_remove(db: tauri::State<'_, db::Db>, id: String) -> Result<(), String> {
+    mcp::remove(&db, &id).map_err(|e| e.to_string())
+}
+
 /// Memories for the panel, with their history when asked. Narrowest scope first.
 #[expect(clippy::needless_pass_by_value)]
 #[tauri::command]
@@ -452,6 +485,10 @@ pub fn run() {
             run_diff,
             run_merge,
             run_worktree_remove,
+            mcp_list,
+            mcp_add,
+            mcp_set_enabled,
+            mcp_remove,
             memory_list,
             memory_update,
             memory_delete,

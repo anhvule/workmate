@@ -18,7 +18,7 @@ interface Harness {
   orch: Orchestrator;
   events: RunEvent[];
   ops: { op: string; args: Record<string, unknown> }[];
-  engine: { sessions: string[]; sent: { session: string; prompt: string; system: string; tools?: unknown }[]; fail: number; gate?: Promise<void> };
+  engine: { mcp: { name: string; config: Record<string, unknown> }[]; servers: { name: string; config: Record<string, unknown> }[]; sessions: string[]; sent: { session: string; prompt: string; system: string; tools?: unknown }[]; fail: number; gate?: Promise<void> };
   provision: { status: "ok" | "missing" };
 }
 
@@ -32,10 +32,11 @@ const harness = (maxConcurrentTurns = 3): Harness => {
     let rows: unknown[] = [];
     if (m.op === "repo.createWorktree") rows = [{ path: `/wt/${String(m.args["runId"])}`, branch: "workmate/run-x", base: "abc" }];
     if (m.op === "permission.ruleset") rows = [[{ permission: "edit", pattern: "/wt/**", action: "allow" }]];
+    if (m.op === "mcp.configs") rows = engine.servers;
     if (m.op === "credentials.provision") rows = [provision.status === "ok" ? { status: "ok" } : { status: "missing", tried: ["v1:global:anthropic"] }];
     queueMicrotask(() => db.settle(m.id, { rows }));
   });
-  const engine: Harness["engine"] = { sessions: [], sent: [], fail: 0 };
+  const engine: Harness["engine"] = { mcp: [], servers: [], sessions: [], sent: [], fail: 0 };
   let n = 0;
   const port: EnginePort = {
     createSession: async (_dir, body) => {
@@ -54,7 +55,9 @@ const harness = (maxConcurrentTurns = 3): Harness => {
       return { text: `done by ${session}` };
     },
     listMessages: async (session) => [{ role: "assistant", text: `concluded in ${session}`, at: 1 }],
-    registerMemoryTools: async () => undefined,
+    registerMcp: async (_dir, name, config) => {
+      engine.mcp.push({ name, config });
+    },
   };
   const memoryDb: DbClient = new DbClient((m: Outbound) => {
     if (m.type === "db.call") queueMicrotask(() => memoryDb.settle(m.id, { rows: [] }));
@@ -66,6 +69,7 @@ const harness = (maxConcurrentTurns = 3): Harness => {
     memory: new MemoryService(memoryDb),
     emit: (e) => events.push(e),
     memoryUrl: () => "http://127.0.0.1:1/mcp/x",
+    memoryAuth: "Bearer t",
     newId: (p) => `${p}_${++ids}`,
     maxConcurrentTurns,
   };
@@ -132,11 +136,45 @@ describe("a team run", () => {
     expect(h.ops.filter((o) => o.op === "repo.removeWorktree")).toHaveLength(0);
   });
 
-  it("an allowlist turns those tools on, keeps memory on, and leaves others to the engine", async () => {
+  it("an allowlist means these on and everything else off, memory always on", async () => {
     const h = harness();
     const { runId } = await h.orch.start({ workspaceId: ws, objective: "x", roles: [role("a", { toolAllowlist: ["read"] })] });
     await h.orch.get(runId).finished;
-    expect(h.engine.sent[0]?.tools).toEqual({ read: true, remember: true, recall: true });
+    const tools = h.engine.sent[0]?.tools as Record<string, boolean>;
+    expect(tools["read"]).toBe(true);
+    expect(tools["bash"]).toBe(false);
+    expect(tools["edit"]).toBe(false);
+    expect(tools["workmate-memory_remember"]).toBe(true);
+    expect(tools["workmate-memory_recall"]).toBe(true);
+  });
+
+  it("no allowlist leaves the engine's defaults alone", async () => {
+    const h = harness();
+    const { runId } = await h.orch.start({ workspaceId: ws, objective: "x", roles: [role("a")] });
+    await h.orch.get(runId).finished;
+    expect(h.engine.sent[0]?.tools).toBeUndefined();
+  });
+
+  it("delivers the user's servers to the engine, and a role sees only those its allowlist names", async () => {
+    const h = harness();
+    h.engine.servers = [
+      { name: "github", config: { type: "remote", url: "https://gh/mcp" } },
+      { name: "docs", config: { type: "remote", url: "https://docs/mcp" } },
+    ];
+    const { runId } = await h.orch.start({ workspaceId: ws, objective: "x", roles: [role("a", { toolAllowlist: ["read", "github"] })] });
+    await h.orch.get(runId).finished;
+    expect(h.engine.mcp.map((m) => m.name)).toEqual(["github", "docs", "workmate-memory"]);
+    const tools = h.engine.sent[0]?.tools as Record<string, boolean>;
+    expect(tools["github_*"]).toBe(true);
+    expect(tools["docs_*"]).toBe(false);
+  });
+
+  it("registers the memory endpoint with its bearer token", async () => {
+    const h = harness();
+    const { runId } = await h.orch.start({ workspaceId: ws, objective: "x", roles: [role("a")] });
+    await h.orch.get(runId).finished;
+    const mem = h.engine.mcp.find((m) => m.name === "workmate-memory");
+    expect(mem?.config).toMatchObject({ type: "remote", headers: { authorization: "Bearer t" } });
   });
 });
 

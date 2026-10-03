@@ -10,6 +10,9 @@ blocked-by: [014]
 
 ## Question
 
+> Widened by [MCP server configuration](018-mcp-servers.md): MCP tools always ask
+> by the same construction, so this decision now covers them too.
+
 [Workspaces and the permission surface](013-workspaces-and-permissions.md) made
 bash allowances unstorable: the grant table holds `read` and `edit` only, so
 "push always asks" is true by construction rather than by a user not having
