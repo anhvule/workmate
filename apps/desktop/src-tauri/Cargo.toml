@@ -26,6 +26,7 @@ ureq = { version = "3", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 base64 = "0.22"
 sha2 = "0.10"
+tauri-plugin-dialog = "2"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

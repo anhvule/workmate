@@ -72,7 +72,12 @@ impl<S: CredentialStore> Host<'_, S> {
                 let ws = self.workspace_checkout(args)?;
                 to_row(&repo::merge(&ws.directory, s(args, "runId")?).map_err(|e| e.to_string())?)
             }
-            "repo.diff" => to_row(&repo::diff(&self.worktree(args)?, s(args, "base")?).map_err(|e| e.to_string())?),
+            "repo.diff" => {
+                let ws = self.workspace_checkout(args)?;
+                let run = s(args, "runId")?;
+                let base = repo::run_base(&ws.directory, run).map_err(|e| e.to_string())?;
+                to_row(&repo::diff(&self.worktree(args)?, &base).map_err(|e| e.to_string())?)
+            }
             "repo.status" => to_row(&repo::status(&self.worktree(args)?).map_err(|e| e.to_string())?),
             "permission.ruleset" => {
                 let ws = self.workspace_checkout(args)?;

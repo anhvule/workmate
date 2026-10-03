@@ -61,6 +61,12 @@ export const commands = (deps: { orch: Orchestrator; db: DbClient; engine: Engin
     "run.amend": async (a) => void orch.get(str(a, "runId")).amend(str(a, "prompt")),
     "run.redirect": async (a) => void orch.get(str(a, "runId")).redirect(str(a, "roleId") as RoleId),
     "run.veto": async (a) => void orch.get(str(a, "runId")).veto(),
+    // Returns once the turn has been accepted; the reply arrives as events and
+    // in the engine's transcript, never as this command's value.
+    "run.say": async (a) => {
+      const run = await orch.ensure(str(a, "runId"));
+      void run.say(str(a, "text")).catch(() => undefined);
+    },
     // The persisted run, ordered by Rust; the UI feeds it to `runTimeline`.
     "run.get": async (a) => {
       const rows = await db.call("run.load", { id: str(a, "runId") });
@@ -69,7 +75,15 @@ export const commands = (deps: { orch: Orchestrator; db: DbClient; engine: Engin
     },
     "run.transcript": (a) => engine.listMessages(str(a, "sessionId"), str(a, "directory")),
     "run.status": async (a) => (await db.call("repo.status", ws(a)))[0],
-    "run.diff": async (a) => (await db.call("repo.diff", { ...ws(a), base: str(a, "base") }))[0],
+    // The base is derived (merge-base), so the UI never tracks commit ids.
+    "run.diff": async (a) => (await db.call("repo.diff", ws(a)))[0],
+    // Answer an engine permission prompt. Always `once`: the durable half of an
+    // "always" is Rust's grant table, and only for read/edit (ticket 013).
+    "permission.reply": async (a) => {
+      const reply = str(a, "reply");
+      if (reply !== "once" && reply !== "reject") throw new Error("a prompt is answered once or rejected");
+      await engine.replyPermission(str(a, "sessionId"), str(a, "permissionId"), reply);
+    },
     // Merging is only ever the user's explicit action.
     "run.merge": async (a) => {
       const out = (await db.call("repo.merge", ws(a)))[0];

@@ -383,6 +383,113 @@ fn spawn_scheduler(app: tauri::AppHandle) {
     });
 }
 
+/// A workspace's runs, newest first. Read straight from Rust's own store, so the
+/// list is there even before the runtime has started.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn run_list(db: tauri::State<'_, db::Db>, workspace_id: String) -> Result<Vec<serde_json::Value>, String> {
+    ops::dispatch(&db, "run.list", &serde_json::json!({"workspaceId": workspace_id}))
+}
+
+/// One persisted run with its sessions and handoffs, in order.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn run_get(db: tauri::State<'_, db::Db>, run_id: String) -> Result<serde_json::Value, String> {
+    ops::dispatch(&db, "run.load", &serde_json::json!({"id": run_id}))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "no such run".to_owned())
+}
+
+/// Show a run's worktree in the file manager. Derived from ids, so the webview
+/// can never ask for an arbitrary path to be opened.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn run_reveal_worktree(app: tauri::AppHandle, workspace_id: String, run_id: String) -> Result<String, String> {
+    let path = repo::worktree_path(&worktree_root(&app)?, &workspace_id, &run_id);
+    if !path.is_dir() {
+        return Err("that worktree no longer exists".into());
+    }
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let opener = "xdg-open";
+    std::process::Command::new(opener).arg(&path).spawn().map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Where a credential applies, as the webview names it.
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum ScopeArg {
+    Global,
+    Workspace { id: String },
+    Role { id: String },
+}
+
+impl From<ScopeArg> for credentials::Scope {
+    fn from(s: ScopeArg) -> Self {
+        match s {
+            ScopeArg::Global => Self::Global,
+            ScopeArg::Workspace { id } => Self::Workspace(id),
+            ScopeArg::Role { id } => Self::Role(id),
+        }
+    }
+}
+
+/// Store a key in the OS keychain. The key goes in and never comes back out:
+/// nothing in workmate returns a secret to the webview.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn credential_set(scope: ScopeArg, provider: String, secret: String) -> Result<(), String> {
+    if provider.trim().is_empty() || secret.trim().is_empty() {
+        return Err("a provider and a key are both required".into());
+    }
+    credentials::Keychain::set(&scope.into(), provider.trim(), secret.trim()).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn credential_delete(scope: ScopeArg, provider: String) -> Result<(), String> {
+    credentials::Keychain::delete(&scope.into(), &provider).map_err(|e| e.to_string())
+}
+
+/// What the webview may know about a credential: whether one resolves and from
+/// where, or everything that was tried. Never the key.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CredentialStatus {
+    found: bool,
+    /// `"role"`, `"workspace"` or `"global"` when found.
+    scope: Option<&'static str>,
+    tried: Vec<String>,
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn credential_status(
+    provider: String,
+    role_id: Option<String>,
+    workspace_id: Option<String>,
+) -> Result<CredentialStatus, String> {
+    match credentials::resolve(&credentials::Keychain, &provider, role_id.as_deref(), workspace_id.as_deref())
+        .map_err(|e| e.to_string())?
+    {
+        credentials::Resolved::Found { scope, .. } => Ok(CredentialStatus {
+            found: true,
+            scope: Some(match scope {
+                credentials::Scope::Role(_) => "role",
+                credentials::Scope::Workspace(_) => "workspace",
+                credentials::Scope::Global => "global",
+            }),
+            tried: vec![],
+        }),
+        credentials::Resolved::Missing { tried } => Ok(CredentialStatus { found: false, scope: None, tried }),
+    }
+}
+
 /// A directory shipped with the app, or the source tree's copy when running
 /// from `tauri dev`, where resources are not staged.
 fn shipped_dir(app: &tauri::AppHandle, name: &str) -> PathBuf {
@@ -715,6 +822,7 @@ fn run_worktree_remove(
 /// persistence would silently lose the user's work.
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             use tauri::Manager as _;
             let dir = app.path().app_data_dir()?;
@@ -757,6 +865,12 @@ pub fn run() {
             automation_history,
             automation_mark_seen,
             automation_unseen,
+            run_list,
+            run_get,
+            run_reveal_worktree,
+            credential_set,
+            credential_delete,
+            credential_status,
             team_list,
             team_create,
             team_update_role,

@@ -44,5 +44,8 @@ export const engineAdapter = (
     return { text: textOf(res.parts) };
   },
   listMessages: async (sessionId, directory) => messagesFrom(await client.listMessages(sessionId, directory)),
+  replyPermission: async (sessionId, permissionId, reply) => {
+    await client.replyPermission(sessionId, permissionId, reply);
+  },
   registerMcp: addMcp,
 });

@@ -20,6 +20,7 @@ interface Harness {
   ops: { op: string; args: Record<string, unknown> }[];
   engine: { mcp: { name: string; config: Record<string, unknown> }[]; servers: { name: string; config: Record<string, unknown> }[]; sessions: string[]; sent: { session: string; prompt: string; system: string; tools?: unknown }[]; fail: number; gate?: Promise<void>; reply?: string };
   quiet: boolean;
+  stored?: Record<string, unknown>;
   provision: { status: "ok" | "missing" };
 }
 
@@ -34,6 +35,8 @@ const harness = (maxConcurrentTurns = 3): Harness => {
     if (m.op === "repo.createWorktree") rows = [{ path: `/wt/${String(m.args["runId"])}`, branch: "workmate/run-x", base: "abc" }];
     if (m.op === "permission.ruleset") rows = [[{ permission: "edit", pattern: "/wt/**", action: "allow" }]];
     if (m.op === "mcp.configs") rows = engine.servers;
+    if (m.op === "run.load") rows = out.stored ? [out.stored] : [];
+    if (m.op === "role.get") rows = [{ id: "coder", name: "coder", systemPrompt: "you are coder", providerId: null, modelId: null, toolAllowlist: [] }];
     if (m.op === "automation.finish") rows = [{ quiet: out.quiet }];
     if (m.op === "credentials.provision") rows = [provision.status === "ok" ? { status: "ok" } : { status: "missing", tried: ["v1:global:anthropic"] }];
     queueMicrotask(() => db.settle(m.id, { rows }));
@@ -57,6 +60,7 @@ const harness = (maxConcurrentTurns = 3): Harness => {
       return { text: engine.reply ?? `done by ${session}` };
     },
     listMessages: async (session) => [{ role: "assistant", text: `concluded in ${session}`, at: 1 }],
+    replyPermission: async () => undefined,
     registerMcp: async (_dir, name, config) => {
       engine.mcp.push({ name, config });
     },
@@ -275,6 +279,50 @@ describe("blocking", () => {
     const h = harness();
     await expect(h.orch.start({ workspaceId: ws, objective: "o", roles: [] })).rejects.toThrow(/at least one role/);
     expect(h.ops).toHaveLength(0);
+  });
+});
+
+describe("talking to a run", () => {
+  it("a one-role run takes follow-up messages on the same session, like a chat", async () => {
+    const h = harness();
+    const { runId } = await h.orch.start({ workspaceId: ws, objective: "hello", roles: [role("coder")] });
+    const run = h.orch.get(runId);
+    await run.finished;
+    await run.say("and one more thing");
+    expect(h.engine.sessions).toEqual(["s1"]);
+    expect(h.engine.sent.map((m) => m.prompt)).toEqual(["hello", "and one more thing"]);
+    expect(run.phase).toBe("done");
+    expect(names(h).some((n) => n.startsWith("run.handoff"))).toBe(false);
+  });
+
+  it("refuses a message while a turn is still running", async () => {
+    const h = harness();
+    let release!: () => void;
+    h.engine.gate = new Promise<void>((r) => (release = r));
+    const { runId } = await h.orch.start({ workspaceId: ws, objective: "o", roles: [role("a")] });
+    await expect(h.orch.get(runId).say("too soon")).rejects.toThrow(/wait for the current turn/);
+    release();
+    await h.orch.get(runId).finished;
+  });
+
+  it("a run survives a restart as data and can be continued from its last session", async () => {
+    const h = harness();
+    h.stored = {
+      id: "run_old", workspaceId: "ws_1", objective: "earlier", state: "done", teamId: null,
+      sessions: [{ id: "s_old", role: "coder", directory: "/wt/run_old" }], handoffs: [],
+    };
+    const run = await h.orch.ensure("run_old");
+    expect(run.phase).toBe("done");
+    await run.say("pick this back up");
+    expect(h.engine.sent[0]).toMatchObject({ session: "s_old", prompt: "pick this back up" });
+    expect(h.engine.sent[0]?.system).toContain("you are coder");
+  });
+
+  it("says plainly when a run cannot be revived", async () => {
+    const h = harness();
+    await expect(h.orch.ensure("run_missing")).rejects.toThrow(/no such run/);
+    h.stored = { id: "r", workspaceId: "ws_1", objective: "o", state: "done", teamId: null, sessions: [], handoffs: [] };
+    await expect(h.orch.ensure("r")).rejects.toThrow(/never started a session/);
   });
 });
 

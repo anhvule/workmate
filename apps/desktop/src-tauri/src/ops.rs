@@ -157,6 +157,44 @@ fn run_load(db: &Db, args: &Value) -> Rows {
     .map_err(|e| e.to_string())
 }
 
+/// A workspace's runs, newest first, without their sessions.
+fn run_list(db: &Db, args: &Value) -> Rows {
+    let ws = str_arg(args, "workspaceId")?;
+    db.with(|c| {
+        let mut s = c.prepare(
+            "SELECT id,objective,branch,state,created_at,team_id FROM run WHERE workspace_id=?1
+             ORDER BY created_at DESC, rowid DESC",
+        )?;
+        let rows = s.query_map([ws], |r| {
+            Ok(json!({"id": r.get::<_, String>(0)?, "objective": r.get::<_, String>(1)?,
+                "branch": r.get::<_, String>(2)?, "state": r.get::<_, String>(3)?,
+                "createdAt": r.get::<_, i64>(4)?, "teamId": r.get::<_, Option<String>>(5)?}))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// One role by id, for reviving a run after a restart.
+fn role_get(db: &Db, args: &Value) -> Rows {
+    let id = str_arg(args, "id")?;
+    db.with(|c| {
+        c.query_row(
+            "SELECT id,name,system_prompt,provider_id,model_id,tool_allowlist FROM role WHERE id=?1",
+            [id],
+            |r| {
+                Ok(json!({"id": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?,
+                    "systemPrompt": r.get::<_, String>(2)?, "providerId": r.get::<_, Option<String>>(3)?,
+                    "modelId": r.get::<_, Option<String>>(4)?,
+                    "toolAllowlist": serde_json::from_str::<Value>(&r.get::<_, String>(5)?).unwrap_or_else(|_| json!([]))}))
+            },
+        )
+        .map(|v| vec![v])
+        .or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(vec![]) } else { Err(e) })
+    })
+    .map_err(|e| e.to_string())
+}
+
 /// Run one named operation, returning its rows.
 ///
 /// # Errors
@@ -171,6 +209,8 @@ pub fn dispatch(db: &Db, op: &str, args: &Value) -> Rows {
         "session.record" => session_record(db, args),
         "handoff.append" => handoff_append(db, args),
         "run.load" => run_load(db, args),
+        "run.list" => run_list(db, args),
+        "role.get" => role_get(db, args),
         // Read-only on purpose: the sidecar can learn what is enabled and can
         // never register a server, because a local server is a command the
         // machine will run.
@@ -241,5 +281,19 @@ mod tests {
     fn loading_a_missing_run_returns_no_rows() {
         let db = seeded();
         assert!(dispatch(&db, "run.load", &json!({"id":"zzz"})).unwrap().is_empty());
+    }
+
+    #[test]
+    fn runs_are_listed_newest_first_per_workspace_and_a_role_can_be_read_back() {
+        let db = seeded();
+        db.with(|c| c.execute("INSERT INTO workspace (id,name,directory,created_at) VALUES ('w2','w2','/w2',0)", [])).unwrap();
+        dispatch(&db, "run.create", &json!({"id":"run2","workspaceId":"w","objective":"second","branch":"b2"})).unwrap();
+        dispatch(&db, "run.create", &json!({"id":"other","workspaceId":"w2","objective":"x","branch":"b3"})).unwrap();
+        let ids: Vec<_> = dispatch(&db, "run.list", &json!({"workspaceId":"w"})).unwrap().iter().map(|r| r["id"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"run1".to_owned()) && ids.contains(&"run2".to_owned()) && !ids.contains(&"other".to_owned()));
+        let role = dispatch(&db, "role.get", &json!({"id":"r1"})).unwrap();
+        assert_eq!(role[0]["systemPrompt"], "plan");
+        assert!(dispatch(&db, "role.get", &json!({"id":"nope"})).unwrap().is_empty());
     }
 }

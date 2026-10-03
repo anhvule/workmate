@@ -60,6 +60,8 @@ export interface EnginePort {
     body: { prompt: string; system: string; model?: { providerID: string; modelID: string }; tools?: Record<string, boolean> },
   ): Promise<{ text: string }>;
   listMessages(sessionId: string, directory: string): Promise<readonly Message[]>;
+  /** Answer a permission prompt the engine raised. */
+  replyPermission(sessionId: string, permissionId: string, reply: "once" | "reject"): Promise<void>;
   /** Register an MCP server for a directory's engine instance. Replaces one of the same name. */
   registerMcp(directory: string, name: string, config: Record<string, unknown>): Promise<void>;
 }
@@ -161,6 +163,7 @@ export class Run {
   private gate: Gate<Decision> | undefined;
   private resumeGate: Gate<void> | undefined;
   private lastSession: SessionId | undefined;
+  private lastRole: RoleSpec | undefined;
   private done: Promise<void> = Promise.resolve();
 
   constructor(
@@ -213,6 +216,35 @@ export class Run {
   veto(): void {
     if (!this.gate) throw new Error("there is no pending handoff to veto");
     this.gate.open({ kind: "veto" });
+  }
+
+  /**
+   * A follow-up message, to the last role's session. This is what makes a
+   * one-role run a plain chat: you can keep talking to it. Allowed only between
+   * turns, because the engine runs one turn per session at a time.
+   */
+  say(text: string): Promise<void> {
+    const role = this.lastRole;
+    const session = this.lastSession;
+    if (this.phase !== "done" || !role || !session) {
+      return Promise.reject(new Error("wait for the current turn to finish before sending another message"));
+    }
+    this.done = (async () => {
+      await this.setPhase("running");
+      try {
+        await this.takeTurn(role, session, text);
+      } finally {
+        await this.setPhase("done");
+      }
+    })();
+    return this.done;
+  }
+
+  /** Mark a run loaded from storage as ready to continue from its last session. */
+  adopt(session: SessionId, role: RoleSpec): void {
+    this.lastSession = session;
+    this.lastRole = role;
+    this.phase = "done";
   }
 
   // ----- the loop -----------------------------------------------------------
@@ -380,6 +412,7 @@ export class Run {
 
       lastText = await this.takeTurn(role, session, incoming?.prompt ?? this.input.objective);
       this.lastSession = session;
+      this.lastRole = role;
 
       if (index === roles.length - 1) break;
 
@@ -465,6 +498,39 @@ export class Orchestrator {
     const r = this.runs.get(id);
     if (!r) throw new Error(`no such run: ${id}`);
     return r;
+  }
+
+  /**
+   * The live run, or one rebuilt from storage. A run survives a restart as data
+   * (sessions, handoffs, the engine's transcripts) and can be continued from its
+   * last session; what it cannot do is resume a handoff that was mid-flight.
+   */
+  async ensure(id: string): Promise<Run> {
+    const live = this.runs.get(id);
+    if (live) return live;
+    const row = (await this.deps.db.call("run.load", { id }))[0] as
+      | { id: string; workspaceId: string; objective: string; state: string; teamId: string | null; sessions: { id: string; role: string; directory: string }[] }
+      | undefined;
+    if (!row) throw new Error(`no such run: ${id}`);
+    const last = row.sessions.at(-1);
+    if (!last) throw new Error("that run never started a session, so there is nothing to continue");
+    const spec = (await this.deps.db.call("role.get", { id: last.role }))[0] as
+      | { id: string; name: string; systemPrompt: string; providerId: string | null; modelId: string | null; toolAllowlist: string[] }
+      | undefined;
+    if (!spec) throw new Error("the role that ran this no longer exists");
+    const role: RoleSpec = {
+      id: spec.id as RoleId,
+      name: spec.name,
+      systemPrompt: spec.systemPrompt,
+      providerId: spec.providerId ?? undefined,
+      modelId: spec.modelId ?? undefined,
+      toolAllowlist: spec.toolAllowlist,
+    };
+    const input: StartRun = { workspaceId: row.workspaceId as WorkspaceId, objective: row.objective, roles: [role] };
+    const run = new Run(id as RunId, input, { path: last.directory, branch: "", base: "" }, this.deps, this.pool);
+    run.adopt(last.id as SessionId, role);
+    this.runs.set(id, run);
+    return run;
   }
 
   async start(input: StartRun): Promise<{ runId: string; branch: string }> {

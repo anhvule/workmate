@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"What the main window may do. App commands are allowed by default; this adds the core event system and the folder picker.","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-open"]}}

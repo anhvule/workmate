@@ -195,6 +195,24 @@ pub fn status(dir: &Path) -> Result<Vec<Change>, RepoError> {
     Ok(out)
 }
 
+/// The commit a run branched from: the merge-base of the user's checkout and
+/// the run's branch. Derived rather than stored, so it cannot go stale — if the
+/// user's branch moves on, the base is still where the run diverged.
+///
+/// # Errors
+/// [`RepoError::NoWorktree`] if the run's branch does not exist.
+pub fn run_base(checkout: &Path, run_id: &str) -> Result<String, RepoError> {
+    let repo = open(checkout)?;
+    let theirs = repo
+        .find_branch(&branch_name(run_id), BranchType::Local)
+        .map_err(|_| RepoError::NoWorktree(run_id.to_owned()))?
+        .get()
+        .peel_to_commit()?
+        .id();
+    let ours = repo.head()?.peel_to_commit()?.id();
+    Ok(repo.merge_base(ours, theirs)?.to_string())
+}
+
 /// What the run changed in `worktree` since `base`, committed or not.
 ///
 /// # Errors
@@ -572,5 +590,15 @@ mod tests {
     fn the_worktree_lives_outside_the_users_checkout() {
         let p = worktree_path(Path::new("/data/worktrees"), "ws_1", "run_2");
         assert_eq!(p, Path::new("/data/worktrees/ws_1/run_2"));
+    }
+
+    #[test]
+    fn the_base_is_where_the_run_diverged_even_after_the_user_moves_on() {
+        let (_t, checkout, wt) = fixture();
+        let made = create_worktree(&checkout, &wt, "run_abc").unwrap();
+        std::fs::write(checkout.join("later.txt"), "u\n").unwrap();
+        commit_all(&Repository::open(&checkout).unwrap(), "user moves on");
+        assert_eq!(run_base(&checkout, "run_abc").unwrap(), made.base);
+        assert!(matches!(run_base(&checkout, "run_nope"), Err(RepoError::NoWorktree(_))));
     }
 }
