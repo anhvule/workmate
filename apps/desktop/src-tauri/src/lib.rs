@@ -11,6 +11,7 @@ pub mod db;
 pub mod engine;
 pub mod ids;
 pub mod migrations;
+pub mod ops;
 pub mod permissions;
 pub mod repo;
 pub mod runtime;
@@ -66,10 +67,17 @@ fn sidecar_present(app: &tauri::AppHandle) -> bool {
 #[expect(clippy::needless_pass_by_value)]
 #[tauri::command]
 fn start_runtime(
+    app: tauri::AppHandle,
     rt: tauri::State<'_, runtime::Runtime>,
     binaries: tauri::State<'_, runtime::Binaries>,
 ) -> Result<String, String> {
-    rt.start(&binaries).map(|a| a.base_url).map_err(|e| e.to_string())
+    use tauri::Manager as _;
+    // The handler serves the sidecar's persistence calls on Rust's connection:
+    // the one writer (ticket 026).
+    let handler: sidecar::Handler = std::sync::Arc::new(move |op, args| {
+        ops::dispatch(&app.state::<db::Db>(), op, args)
+    });
+    rt.start(&binaries, handler).map(|a| a.base_url).map_err(|e| e.to_string())
 }
 
 /// The schema version this build expects, surfaced for diagnostics.

@@ -10,8 +10,11 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use serde_json::{json, Value};
 
 use crate::engine::EngineAddress;
 
@@ -80,9 +83,49 @@ pub fn hello(address: &EngineAddress) -> Result<String, SidecarError> {
     Ok(line)
 }
 
+/// Serves a named persistence operation: `(op, args)` to rows or a message.
+pub type Handler = Arc<dyn Fn(&str, &Value) -> Result<Vec<Value>, String> + Send + Sync>;
+
+/// The reply to one `db.call`, by request id.
+///
+/// Both outcomes are replies: a failing operation must answer, or the sidecar
+/// would wait on it until its own timeout.
+#[must_use]
+pub fn reply(id: &str, outcome: Result<Vec<Value>, String>) -> String {
+    let msg = match outcome {
+        Ok(rows) => json!({"type": "db.result", "id": id, "rows": rows}),
+        Err(message) => json!({"type": "db.error", "id": id, "message": message}),
+    };
+    format!("{msg}\n")
+}
+
+/// Serve one line of post-handshake sidecar output. Returns the reply to write,
+/// if the line was a `db.call`.
+///
+/// Anything else is logged and dropped: `fault` is the sidecar's own account of
+/// itself, and `event` forwarding belongs to the event stream (ticket 023).
+#[must_use]
+pub fn serve(line: &str, handler: &Handler) -> Option<String> {
+    let value: Value = serde_json::from_str(line).ok()?;
+    match value.get("type").and_then(Value::as_str)? {
+        "db.call" => {
+            let id = value.get("id").and_then(Value::as_str)?;
+            let op = value.get("op").and_then(Value::as_str).unwrap_or_default();
+            let args = value.get("args").cloned().unwrap_or(Value::Null);
+            Some(reply(id, handler(op, &args)))
+        }
+        "fault" => {
+            eprintln!("sidecar fault: {}", value.get("message").and_then(Value::as_str).unwrap_or("?"));
+            None
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug)]
 pub struct Sidecar {
     child: Child,
+    stdin: Arc<Mutex<ChildStdin>>,
     pub pid: i64,
 }
 
@@ -92,7 +135,11 @@ impl Sidecar {
     /// # Errors
     /// Returns [`SidecarError`] if the binary is missing, cannot be spawned,
     /// faults, exits during startup, or never reports ready.
-    pub fn start(binary: &Path, address: &EngineAddress) -> Result<Self, SidecarError> {
+    pub fn start(
+        binary: &Path,
+        address: &EngineAddress,
+        handler: Handler,
+    ) -> Result<Self, SidecarError> {
         if !binary.exists() {
             return Err(SidecarError::BinaryMissing(binary.to_path_buf()));
         }
@@ -102,11 +149,10 @@ impl Sidecar {
             .stderr(Stdio::inherit())
             .spawn()?;
 
-        {
-            let stdin = child.stdin.as_mut().ok_or(SidecarError::ExitedDuringStartup)?;
-            stdin.write_all(hello(address)?.as_bytes())?;
-            stdin.flush()?;
-        }
+        let mut stdin = child.stdin.take().ok_or(SidecarError::ExitedDuringStartup)?;
+        stdin.write_all(hello(address)?.as_bytes())?;
+        stdin.flush()?;
+        let stdin = Arc::new(Mutex::new(stdin));
 
         let stdout = child.stdout.take().ok_or(SidecarError::ExitedDuringStartup)?;
         let mut reader = BufReader::new(stdout);
@@ -125,7 +171,10 @@ impl Sidecar {
                     return Err(SidecarError::ExitedDuringStartup);
                 }
                 Ok(_) => match classify(&line) {
-                    Handshake::Ready { pid } => return Ok(Self { child, pid }),
+                    Handshake::Ready { pid } => {
+                        Self::pump(reader, &stdin, handler);
+                        return Ok(Self { child, stdin, pid });
+                    }
                     Handshake::Fault(message) => {
                         let _ = child.kill();
                         return Err(SidecarError::Fault(message));
@@ -140,6 +189,34 @@ impl Sidecar {
         }
     }
 
+    /// Serve the sidecar's persistence calls until its stdout closes.
+    ///
+    /// One thread, so calls are handled in the order they were sent: writes
+    /// within a run cannot reorder. A slow operation delays later ones, which is
+    /// the price of that guarantee.
+    fn pump(
+        mut reader: BufReader<std::process::ChildStdout>,
+        stdin: &Arc<Mutex<ChildStdin>>,
+        handler: Handler,
+    ) {
+        let stdin = Arc::clone(stdin);
+        std::thread::spawn(move || {
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) => {}
+                }
+                let Some(out) = serve(&line, &handler) else { continue };
+                let Ok(mut w) = stdin.lock() else { return };
+                if w.write_all(out.as_bytes()).and_then(|()| w.flush()).is_err() {
+                    return;
+                }
+            }
+        });
+    }
+
     /// Ask the sidecar to stop, then make sure it did.
     ///
     /// Ordering matters at shutdown: the sidecar goes first, so it is never left
@@ -148,7 +225,7 @@ impl Sidecar {
     /// # Errors
     /// Returns [`SidecarError::Spawn`] if the process cannot be signalled.
     pub fn stop(&mut self) -> Result<(), SidecarError> {
-        if let Some(stdin) = self.child.stdin.as_mut() {
+        if let Ok(mut stdin) = self.stdin.lock() {
             let _ = stdin.write_all(b"{\"type\":\"shutdown\"}\n");
             let _ = stdin.flush();
         }
@@ -173,6 +250,64 @@ mod tests {
             base_url: "http://127.0.0.1:4096".to_owned(),
             password: "secret".to_owned(),
         }
+    }
+
+    fn no_ops() -> Handler {
+        Arc::new(|_, _| Ok(vec![]))
+    }
+
+    #[test]
+    fn a_db_call_is_answered_by_id_with_rows_or_an_error() {
+        let h: Handler = Arc::new(|op, args| {
+            if op == "ok" { Ok(vec![args.clone()]) } else { Err(format!("no {op}")) }
+        });
+        let ok = serve(r#"{"type":"db.call","id":"7","op":"ok","args":{"a":1}}"#, &h).unwrap();
+        let v: Value = serde_json::from_str(ok.trim()).unwrap();
+        assert_eq!((v["type"].as_str(), v["id"].as_str()), (Some("db.result"), Some("7")));
+        assert_eq!(v["rows"][0]["a"], 1);
+        let bad = serve(r#"{"type":"db.call","id":"8","op":"nope"}"#, &h).unwrap();
+        assert!(bad.contains("db.error") && bad.contains("no nope"));
+    }
+
+    #[test]
+    fn other_traffic_and_noise_get_no_reply() {
+        let h = no_ops();
+        assert!(serve(r#"{"type":"event","name":"x"}"#, &h).is_none());
+        assert!(serve(r#"{"type":"fault","message":"m"}"#, &h).is_none());
+        assert!(serve("not json", &h).is_none());
+    }
+
+    /// A stand-in sidecar over real pipes: it announces ready, makes a call,
+    /// and records the reply it reads back.
+    #[cfg(unix)]
+    #[test]
+    fn a_call_makes_the_round_trip_over_real_pipes() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(crate::ids::new_id("pipe"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("reply.txt");
+        let script = dir.join("fake-sidecar");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nread hello\necho '{{\"type\":\"ready\",\"pid\":1}}'\n\
+                 echo '{{\"type\":\"db.call\",\"id\":\"a\",\"op\":\"echo\",\"args\":{{\"n\":5}}}}'\n\
+                 read reply\necho \"$reply\" > {}\n",
+                out.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let h: Handler = Arc::new(|_, args| Ok(vec![args.clone()]));
+        let _sidecar = Sidecar::start(&script, &address(), h).unwrap();
+        for _ in 0..100 {
+            if out.exists() && std::fs::metadata(&out).unwrap().len() > 0 { break; }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let got = std::fs::read_to_string(&out).unwrap();
+        assert!(got.contains(r#""id":"a""#) && got.contains(r#""n":5"#), "got {got}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -210,7 +345,7 @@ mod tests {
 
     #[test]
     fn a_missing_binary_is_reported_as_such() {
-        let err = Sidecar::start(Path::new("/nonexistent/workmate-sidecar"), &address())
+        let err = Sidecar::start(Path::new("/nonexistent/workmate-sidecar"), &address(), no_ops())
             .expect_err("must fail");
         assert!(matches!(err, SidecarError::BinaryMissing(_)));
     }
@@ -223,7 +358,7 @@ mod tests {
             eprintln!("skipping: run `pnpm sidecar:build` to exercise this test");
             return;
         }
-        let sidecar = Sidecar::start(&binary, &address()).expect("sidecar should start");
+        let sidecar = Sidecar::start(&binary, &address(), no_ops()).expect("sidecar should start");
         assert!(sidecar.pid > 0, "ready must carry a real pid");
     }
 }

@@ -9,6 +9,7 @@
  * Readiness is the `ready` message on stdout, never the spawn — the same rule
  * Rust applies to the engine.
  */
+import { DbClient } from "./db.js";
 import { OpenCodeClient } from "@workmate/opencode-client";
 import {
   encodeOutbound,
@@ -31,6 +32,8 @@ const log = (message: string, detail?: unknown): void => {
 
 export interface SidecarState {
   engine?: OpenCodeClient | undefined;
+  /** Present once the handshake has run; persistence goes through it. */
+  db?: DbClient | undefined;
 }
 
 /** Exported for testing: the message loop, free of process wiring. */
@@ -51,16 +54,22 @@ export const handle = (
   switch (msg.type) {
     case "hello":
       state.engine = makeClient(msg.engine);
+      state.db = new DbClient(emit);
       emit({ type: "ready", pid: process.pid });
       return "continue";
     case "shutdown":
       return "stop";
     case "db.result":
-    case "db.error":
-      // Persistence replies are routed to their waiting caller once the query
-      // layer lands; unmatched ids are a fault, not something to swallow.
-      emit({ type: "fault", message: `unmatched persistence reply ${msg.id}` });
+    case "db.error": {
+      // Unmatched ids stay a fault, not something to swallow: a late reply to a
+      // timed-out call means Rust did the write while the run believes it failed.
+      const settled = state.db?.settle(
+        msg.id,
+        msg.type === "db.result" ? { rows: msg.rows } : { error: msg.message },
+      );
+      if (!settled) emit({ type: "fault", message: `unmatched persistence reply ${msg.id}` });
       return "continue";
+    }
   }
 };
 

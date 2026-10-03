@@ -19,7 +19,8 @@ export type Inbound =
 export type Outbound =
   /** Readiness. Rust waits for this, never for the spawn itself. */
   | { readonly type: "ready"; readonly pid: number }
-  | { readonly type: "db.query"; readonly id: string; readonly sql: string; readonly params: readonly unknown[] }
+  /** A named operation, never SQL: the schema stays Rust's (ticket 026). */
+  | { readonly type: "db.call"; readonly id: string; readonly op: string; readonly args: Record<string, unknown> }
   | { readonly type: "event"; readonly name: string; readonly payload: unknown }
   | { readonly type: "fault"; readonly message: string };
 

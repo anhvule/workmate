@@ -42,4 +42,14 @@ describe("handle", () => {
     handle(JSON.stringify({ type: "db.result", id: "x", rows: [] }), {}, emit);
     expect(out[0]).toMatchObject({ type: "fault", message: /unmatched/ as unknown as string });
   });
+
+  it("routes a persistence reply to the call waiting on it", async () => {
+    const { out, emit } = collect();
+    const state: SidecarState = {};
+    handle(hello, state, emit, () => ({}) as never);
+    const p = state.db!.call("run.load", { id: "r" });
+    handle(JSON.stringify({ type: "db.result", id: "1", rows: [1] }), state, emit);
+    await expect(p).resolves.toEqual([1]);
+    expect(out.some((m) => m.type === "fault")).toBe(false);
+  });
 });

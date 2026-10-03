@@ -149,6 +149,10 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   rather than paths. Merge is explicit and computed in memory first, so a conflict
   changes nothing; archive keeps the branch, abandon deletes it, and neither
   discards uncommitted work without `force`.
+- [The persistence IPC](tickets/026-persistence-ipc.md) — the sidecar names
+  operations (`run.create`, `handoff.append`, …) and Rust runs the SQL on a
+  single in-order pump thread. Calls time out rather than hang, and a reply with
+  no waiter stays a fault.
 
 ## Not yet specified
 

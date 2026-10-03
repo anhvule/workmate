@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::engine::{Engine, EngineAddress, EngineError};
-use crate::sidecar::{Sidecar, SidecarError};
+use crate::sidecar::{Handler, Sidecar, SidecarError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
@@ -65,7 +65,7 @@ impl Runtime {
     /// Returns [`RuntimeError`] if either child fails to start. The engine is
     /// stopped again if the sidecar fails, so a half-started runtime is never
     /// left behind.
-    pub fn start(&self, binaries: &Binaries) -> Result<EngineAddress, RuntimeError> {
+    pub fn start(&self, binaries: &Binaries, handler: Handler) -> Result<EngineAddress, RuntimeError> {
         let mut children = self.children.lock().map_err(|_| RuntimeError::Poisoned)?;
         if let Some(engine) = children.engine.as_ref() {
             if children.sidecar.is_some() {
@@ -76,7 +76,7 @@ impl Runtime {
         let engine = Engine::start(&binaries.engine)?;
         let address = engine.address().clone();
 
-        match Sidecar::start(&binaries.sidecar, &address) {
+        match Sidecar::start(&binaries.sidecar, &address, handler) {
             Ok(sidecar) => {
                 children.engine = Some(engine);
                 children.sidecar = Some(sidecar);
@@ -121,6 +121,10 @@ impl Runtime {
 mod tests {
     use super::*;
 
+    fn no_ops() -> Handler {
+        std::sync::Arc::new(|_, _| Ok(vec![]))
+    }
+
     fn bundled() -> Binaries {
         Binaries::in_dir(&Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries"))
     }
@@ -143,7 +147,7 @@ mod tests {
     fn a_missing_engine_fails_before_the_sidecar_is_ever_spawned() {
         let runtime = Runtime::default();
         let err = runtime
-            .start(&Binaries::in_dir(Path::new("/nonexistent")))
+            .start(&Binaries::in_dir(Path::new("/nonexistent")), no_ops())
             .expect_err("must fail");
         assert!(matches!(err, RuntimeError::Engine(EngineError::BinaryMissing(_))));
         assert!(runtime.address().expect("address").is_none());
@@ -158,12 +162,12 @@ mod tests {
             return;
         }
         let runtime = Runtime::default();
-        let address = runtime.start(&binaries).expect("runtime should start");
+        let address = runtime.start(&binaries, no_ops()).expect("runtime should start");
         assert!(address.base_url.starts_with("http://127.0.0.1:"));
         assert!(runtime.address().expect("address").is_some());
 
         // Idempotent: a second start returns the same address, not a new engine.
-        assert_eq!(runtime.start(&binaries).expect("second start"), address);
+        assert_eq!(runtime.start(&binaries, no_ops()).expect("second start"), address);
 
         runtime.shutdown().expect("shutdown");
         assert!(runtime.address().expect("address").is_none());
