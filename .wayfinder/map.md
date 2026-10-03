@@ -157,6 +157,10 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   the engine's matcher has no escape for `*` or `?`, so they are spelled `?` (one
   character, not unbounded) and an explicit grant for such a path is refused.
   Brackets and braces were already literal.
+- [The engine event stream](tickets/023-event-stream.md) — Rust subscribes to
+  `/global/event`, scrubs credentials, tags permission and completion events for
+  Rust to act on, and emits `sidecar:<type>` with a gap-detecting `seq`/`epoch`.
+  After a reconnect the engine's transcript, not the stream, is the truth.
 
 ## Not yet specified
 

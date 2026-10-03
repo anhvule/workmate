@@ -127,3 +127,4 @@ export class OpenCodeClient {
     return `${this.address.baseUrl}/global/event`;
   }
 }
+export * from "./events.js";

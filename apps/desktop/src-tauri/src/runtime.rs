@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::engine::{Engine, EngineAddress, EngineError};
+use crate::events::Subscriber;
 use crate::sidecar::{Handler, Sidecar, SidecarError};
 
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +50,7 @@ impl Binaries {
 struct Children {
     engine: Option<Engine>,
     sidecar: Option<Sidecar>,
+    events: Option<Subscriber>,
 }
 
 /// The runtime, managed by Tauri.
@@ -91,13 +93,32 @@ impl Runtime {
         }
     }
 
-    /// Stop both, sidecar first.
+    /// Attach the event subscription once the engine is up. Idempotent, like
+    /// [`Self::start`]: a second attach would double every event.
+    ///
+    /// # Errors
+    /// Returns [`RuntimeError::Poisoned`] if a holder of the lock panicked.
+    pub fn attach_events(
+        &self,
+        make: impl FnOnce(&EngineAddress) -> Subscriber,
+    ) -> Result<(), RuntimeError> {
+        let mut children = self.children.lock().map_err(|_| RuntimeError::Poisoned)?;
+        if children.events.is_none() {
+            if let Some(engine) = children.engine.as_ref() {
+                children.events = Some(make(engine.address()));
+            }
+        }
+        Ok(())
+    }
+
+    /// Stop all: events first, then the sidecar, then the engine.
     ///
     /// # Errors
     /// Returns [`RuntimeError::Poisoned`] if a holder of the lock panicked.
     /// Failure to signal a child is not an error: it is already gone.
     pub fn shutdown(&self) -> Result<(), RuntimeError> {
         let mut children = self.children.lock().map_err(|_| RuntimeError::Poisoned)?;
+        drop(children.events.take());
         if let Some(mut sidecar) = children.sidecar.take() {
             let _ = sidecar.stop();
         }

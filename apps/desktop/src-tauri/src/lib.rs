@@ -9,6 +9,7 @@
 pub mod credentials;
 pub mod db;
 pub mod engine;
+pub mod events;
 pub mod ids;
 pub mod migrations;
 pub mod ops;
@@ -74,10 +75,24 @@ fn start_runtime(
     use tauri::Manager as _;
     // The handler serves the sidecar's persistence calls on Rust's connection:
     // the one writer (ticket 026).
+    let db_app = app.clone();
     let handler: sidecar::Handler = std::sync::Arc::new(move |op, args| {
-        ops::dispatch(&app.state::<db::Db>(), op, args)
+        ops::dispatch(&db_app.state::<db::Db>(), op, args)
     });
-    rt.start(&binaries, handler).map(|a| a.base_url).map_err(|e| e.to_string())
+    let address = rt.start(&binaries, handler).map_err(|e| e.to_string())?;
+    // The sink runs here, in Rust, whether or not a window is watching: a
+    // backgrounded `WKWebView` is throttled and would miss completion. The
+    // webview gets a scrubbed copy to render (ticket 023).
+    let emit_app = app.clone();
+    rt.attach_events(|addr| {
+        let sink: events::Sink = std::sync::Arc::new(move |e| {
+            use tauri::Emitter as _;
+            let _ = emit_app.emit(&e.name, &e);
+        });
+        events::Subscriber::start(addr, sink, events::Backoff::default())
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(address.base_url)
 }
 
 /// The schema version this build expects, surfaced for diagnostics.
