@@ -54,7 +54,7 @@ with the hardened runtime and a minimal `entitlements.plist` (JIT and unsigned
 executable memory, for the two JavaScript runtimes; no sandbox). Without secrets
 the workflow builds unsigned and says so.
 
-**CI.** One runner per architecture (`macos-14` arm64, `macos-13` x64), because the
+**CI.** One runner per architecture (`macos-15` arm64, `macos-15-intel` x64; `macos-13` is retired), because the
 engine cannot be cross-compiled: each fetches its own pinned binary, runs the same
 `pnpm gate` as the pre-commit hook, then the engine end-to-end test. The release
 job checks the tag against the three version fields, builds, verifies the bundle,
