@@ -1,0 +1,7 @@
+# Pinned, like the engine: the pre-commit hook and CI must run the same clippy,
+# or a lint added in a new stable release fails CI on code that passed locally
+# (it did — 1.99 added one). Move this deliberately, and fix what it finds.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy"]
+profile = "minimal"

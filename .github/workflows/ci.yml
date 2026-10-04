@@ -25,9 +25,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      # The version comes from rust-toolchain.toml; rustup installs it on first use.
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
@@ -41,4 +40,31 @@ jobs:
       - run: pnpm gate
       # Needs the real engine and, on a cold cache, a network; opt-in locally,
       # on in CI where both exist.
+      - run: pnpm test:e2e
+
+  # Linux: the engine has a build and the engine home is already isolated through
+  # XDG variables, which Linux honours as-is. This job is what tells us the rest
+  # of the claim is true; it is not yet a shipped target (no .deb/.AppImage).
+  gate-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries for Tauri and the keychain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev libdbus-1-dev pkg-config
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm sidecar:fetch
+      - run: pnpm sidecar:build
+      - run: pnpm gate
       - run: pnpm test:e2e
