@@ -61,7 +61,7 @@ export interface EnginePort {
   ): Promise<{ text: string }>;
   listMessages(sessionId: string, directory: string): Promise<readonly Message[]>;
   /** Answer a permission prompt the engine raised. */
-  replyPermission(sessionId: string, permissionId: string, reply: "once" | "reject"): Promise<void>;
+  replyPermission(sessionId: string, permissionId: string, reply: "once" | "reject" | "always"): Promise<void>;
   /** Register an MCP server for a directory's engine instance. Replaces one of the same name. */
   registerMcp(directory: string, name: string, config: Record<string, unknown>): Promise<void>;
 }

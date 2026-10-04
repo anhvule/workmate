@@ -204,6 +204,10 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   none, deliberately: nothing about a user's work leaves the machine. Local
   rotating logs instead, which fixed a real hang: the engine's pipes were not
   being drained after startup.
+- [Whether a shell allowance can ever be durable](tickets/028-durable-shell-allowance.md)
+  — yes, per workspace, as screened command prefixes and MCP server names; push
+  is re-asserted after every allowance. Safe because the engine judges each
+  command in a chain alone, which is now proven against the pinned engine.
 
 ## Not yet specified
 

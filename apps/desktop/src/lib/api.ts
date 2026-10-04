@@ -11,6 +11,14 @@ export interface Grant {
   createdAt: number;
 }
 
+export interface Allowance {
+  id: string;
+  workspaceId: string;
+  kind: "bash" | "mcp";
+  value: string;
+  createdAt: number;
+}
+
 export type Scope = { kind: "global" } | { kind: "workspace"; id: string } | { kind: "role"; id: string };
 
 /** A command routed through Rust to the orchestrating sidecar. */
@@ -57,7 +65,7 @@ export const api = {
     abandon: (workspaceId: string, runId: string, force: boolean) =>
       cmd("run.abandon", { workspaceId, runId, force }),
     reveal: (workspaceId: string, runId: string) => invoke<string>("run_reveal_worktree", { workspaceId, runId }),
-    replyPermission: (sessionId: string, permissionId: string, reply: "once" | "reject") =>
+    replyPermission: (sessionId: string, permissionId: string, reply: "once" | "reject" | "always") =>
       cmd("permission.reply", { sessionId, permissionId, reply }),
   },
 
@@ -124,6 +132,13 @@ export const api = {
     add: (workspaceId: string, path: string, operation: "read" | "edit") =>
       invoke<Grant>("permission_add", { workspaceId, path, operation, source: "user" }),
     revoke: (grantId: string) => invoke<void>("permission_revoke", { grantId }),
+  },
+
+  allowances: {
+    list: (workspaceId: string) => invoke<Allowance[]>("allowance_list", { workspaceId }),
+    add: (workspaceId: string, kind: "bash" | "mcp", value: string) =>
+      invoke<Allowance>("allowance_add", { workspaceId, kind, value }),
+    remove: (id: string) => invoke<void>("allowance_remove", { id }),
   },
 
   mcp: {

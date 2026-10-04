@@ -116,3 +116,24 @@ describe("memory", () => {
     expect(screen.getByText(/This project uses pnpm/)).toBeTruthy();
   });
 });
+
+describe("always allowed", () => {
+  it("adds a command for this project, refuses a dangerous one with the reason, and can revoke", async () => {
+    const user = await open("?demo");
+    await user.click(await screen.findByRole("tab", { name: "Settings" }));
+    const section = await screen.findByRole("region", { name: "Always allowed" });
+    const box = within(section).getByLabelText("Command or server");
+
+    await user.type(box, "pnpm test");
+    await user.click(within(section).getByRole("button", { name: "Allow" }));
+    expect(await within(section).findByText("pnpm test")).toBeTruthy();
+
+    await user.type(box, "git push origin main");
+    await user.click(within(section).getByRole("button", { name: "Allow" }));
+    expect(await within(section).findByText(/always asks/)).toBeTruthy();
+    expect(within(section).queryByText("git push origin main")).toBeNull();
+
+    await user.click(within(section).getByRole("button", { name: "Revoke" }));
+    expect(await within(section).findByText(/Everything asks first/)).toBeTruthy();
+  });
+});

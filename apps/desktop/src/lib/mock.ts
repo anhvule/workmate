@@ -49,6 +49,7 @@ export const mockBridge = (opts: MockOptions = {}): { invoke: Invoke; listen: Li
   const mcp: T.McpServer[] = [];
   const installed: T.InstalledSkill[] = [];
   const keys = new Set<string>();
+  const allowances: { id: string; workspaceId: string; kind: "bash" | "mcp"; value: string; createdAt: number }[] = [];
   let defaultModel: { provider: string | null; model: string | null } = { provider: null, model: null };
   const pending = new Map<string, { resolve: (d: { kind: string; prompt?: string; roleId?: string }) => void }>();
   const roleOf = new Map<string, T.Role[]>();
@@ -249,6 +250,16 @@ export const mockBridge = (opts: MockOptions = {}): { invoke: Invoke; listen: Li
       case "automation_history": return ok(fires.filter((f) => !args["automationId"] || f.automationId === args["automationId"]));
       case "automation_mark_seen": fires.find((f) => f.id === args["fireId"])!.seen = true; return ok(null);
       case "automation_unseen": return ok(fires.filter((f) => !f.seen && ["completed", "blocked", "failed"].includes(f.outcome)).length);
+      case "allowance_list": return ok(allowances.filter((a) => a.workspaceId === args["workspaceId"]));
+      case "allowance_add": {
+        // The real screening is Rust's; the mock refuses the obvious cases so the UI path is exercised.
+        const v = String(args["value"]).replace(/ \*$/, "").trim();
+        if (/^(git push|rm|sudo|curl)\b|[;&|$`]/.test(v)) throw new Error(`\`${v}\` can change things outside the project or publish them, so it always asks`);
+        const a = { id: id("allow"), workspaceId: args["workspaceId"], kind: args["kind"], value: v, createdAt: now() };
+        allowances.push(a);
+        return ok(a);
+      }
+      case "allowance_remove": allowances.splice(allowances.findIndex((a) => a.id === args["id"]), 1); return ok(null);
       case "mcp_list": return ok(mcp);
       case "mcp_add": { const s = { id: id("mcp"), workspaceId: args["workspaceId"], name: args["name"], enabled: true, ...args["transport"] } as T.McpServer; mcp.push(s); return ok(s); }
       case "mcp_set_enabled": mcp.find((s) => s.id === args["id"])!.enabled = args["enabled"]; return ok(null);

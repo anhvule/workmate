@@ -228,6 +228,20 @@ ALTER TABLE app_settings ADD COLUMN default_provider TEXT;
 ALTER TABLE app_settings ADD COLUMN default_model TEXT;
 ";
 
+/// Durable allowances for shell commands and MCP servers, per workspace
+/// (ticket 028). A separate table from `permission_grant` on purpose: grants are
+/// paths, these are commands, and only these are screened for dangerous verbs.
+const V7: &str = r"
+CREATE TABLE allowance (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL CHECK (kind IN ('bash','mcp')),
+    value        TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    UNIQUE (workspace_id, kind, value)
+);
+";
+
 const LADDER: &[Migration] = &[
     Migration {
         version: 1,
@@ -258,6 +272,11 @@ const LADDER: &[Migration] = &[
         version: 6,
         name: "default model",
         sql: V6,
+    },
+    Migration {
+        version: 7,
+        name: "allowances",
+        sql: V7,
     },
 ];
 

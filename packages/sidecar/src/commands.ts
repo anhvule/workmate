@@ -84,11 +84,13 @@ export const commands = (deps: {
     "run.status": async (a) => (await db.call("repo.status", ws(a)))[0],
     // The base is derived (merge-base), so the UI never tracks commit ids.
     "run.diff": async (a) => (await db.call("repo.diff", ws(a)))[0],
-    // Answer an engine permission prompt. Always `once`: the durable half of an
-    // "always" is Rust's grant table, and only for read/edit (ticket 013).
+    // Answer an engine permission prompt. `always` reaches the engine only
+    // after the UI has stored a screened allowance in Rust (ticket 028): the
+    // durable record is workmate's, and the engine's in-session "always" just
+    // stops it asking again before the next session picks the allowance up.
     "permission.reply": async (a) => {
       const reply = str(a, "reply");
-      if (reply !== "once" && reply !== "reject") throw new Error("a prompt is answered once or rejected");
+      if (reply !== "once" && reply !== "reject" && reply !== "always") throw new Error("a prompt is answered once, always or rejected");
       await engine.replyPermission(str(a, "sessionId"), str(a, "permissionId"), reply);
     },
     // Merging is only ever the user's explicit action.

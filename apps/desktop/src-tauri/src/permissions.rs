@@ -41,6 +41,8 @@ pub enum PermissionError {
     Db(#[from] DbError),
     #[error(transparent)]
     Mcp(#[from] crate::mcp::McpError),
+    #[error("allowances: {0}")]
+    Allowance(String),
 }
 
 /// The operations a grant can widen.
@@ -282,7 +284,30 @@ pub fn record_reply(
 /// [`PermissionError::Db`] if the grants cannot be read.
 pub fn ruleset(db: &Db, ws: &Workspace, worktree: &Path) -> Result<Vec<Rule>, PermissionError> {
     let servers = crate::mcp::enabled_names(db, &ws.id)?;
-    Ok(compile_with_mcp(&ws.directory, worktree, &grants(db, &ws.id)?, &servers))
+    let allowed = crate::allowance::list(db, &ws.id).map_err(|e| PermissionError::Allowance(e.to_string()))?;
+    let mut rules = compile_with_mcp(&ws.directory, worktree, &grants(db, &ws.id)?, &servers);
+    with_allowances(&mut rules, &allowed);
+    Ok(rules)
+}
+
+/// Insert stored allowances just before the hard denies, then re-assert that
+/// push asks *after* them, so no stored prefix can outrank it (ticket 028).
+///
+/// Everything an allowance can name was screened when it was stored; this only
+/// places it. A bash allowance compiles to `<prefix> *`, which the engine reads
+/// as the command with any arguments and judges command by command.
+pub fn with_allowances(rules: &mut Vec<Rule>, allowed: &[crate::allowance::Allowance]) {
+    use crate::allowance::Kind;
+    let at = rules.iter().position(|r| r.action == Action::Deny && r.pattern.contains(".git")).unwrap_or(rules.len());
+    let mut add: Vec<Rule> = allowed
+        .iter()
+        .map(|a| match a.kind {
+            Kind::Bash => rule("bash", format!("{} *", a.value), Action::Allow),
+            Kind::Mcp => rule(&format!("{}_*", a.value), "*", Action::Allow),
+        })
+        .collect();
+    add.push(rule("bash", "git push *", Action::Ask));
+    rules.splice(at..at, add);
 }
 
 /// The ruleset for a run nobody is watching: every *ask* becomes a *deny*.
@@ -693,5 +718,37 @@ mod tests {
         assert_eq!(allows(&quiet), allows(&rules), "nothing is widened");
         let gh = quiet.iter().find(|r| r.permission == "gh_*").unwrap();
         assert_eq!(gh.action, Action::Deny, "an MCP tool cannot run unattended");
+    }
+
+    fn allow(kind: crate::allowance::Kind, value: &str) -> crate::allowance::Allowance {
+        crate::allowance::Allowance { id: "a".into(), workspace_id: "w".into(), kind, value: value.into(), created_at: 0 }
+    }
+
+    #[test]
+    fn an_allowance_widens_the_shell_but_push_still_asks_and_git_internals_stay_denied() {
+        use crate::allowance::Kind;
+        let mut rules = compile_with_mcp(Path::new("/p"), Path::new("/wt"), &[], &["github".into()]);
+        with_allowances(&mut rules, &[allow(Kind::Bash, "pnpm test"), allow(Kind::Mcp, "github")]);
+        let pos = |perm: &str, pat: &str| rules.iter().rposition(|r| r.permission == perm && r.pattern == pat).unwrap();
+        let test = pos("bash", "pnpm test *");
+        assert_eq!(rules[test].action, Action::Allow);
+        assert!(test > pos("bash", "*"), "after the floor, so it wins over asking");
+        let push = pos("bash", "git push *");
+        assert!(push > test && rules[push].action == Action::Ask, "push is re-asserted after every allowance");
+        let gh_allow = pos("github_*", "*");
+        assert_eq!(rules[gh_allow].action, Action::Allow, "the server's tools stop asking");
+        assert!(gh_allow > rules.iter().position(|r| r.permission == "github_*").unwrap());
+        assert!(pos("edit", "**/.git/**") > push, "the hard denies are still last");
+    }
+
+    #[test]
+    fn unattended_runs_keep_allowances_and_refuse_push() {
+        use crate::allowance::Kind;
+        let mut rules = compile(Path::new("/p"), Path::new("/wt"), &[]);
+        with_allowances(&mut rules, &[allow(Kind::Bash, "cargo test")]);
+        let quiet = without_prompts(rules);
+        let find = |pat: &str| quiet.iter().rev().find(|r| r.permission == "bash" && r.pattern == pat).unwrap().action;
+        assert_eq!(find("cargo test *"), Action::Allow, "an automation can now run the tests");
+        assert_eq!(find("git push *"), Action::Deny, "and can never push");
     }
 }

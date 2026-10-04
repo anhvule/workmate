@@ -65,6 +65,9 @@ describe.skipIf(!enabled)("the real engine", () => {
         const userText = JSON.stringify(messages.find((m) => m.role === "user")?.content ?? "");
         if (messages.at(-1)?.role === "tool") {
           res.write(sse({ role: "assistant", content: "" }) + sse({ content: "Noted." }) + sse({}, "stop"));
+        } else if (userText.includes("run:")) {
+          const command = /run:([^"\\]+)/.exec(userText)?.[1]?.trim() ?? "true";
+          res.write(sse({ role: "assistant", content: null, tool_calls: [{ index: 0, id: "call_b", type: "function", function: { name: "bash", arguments: JSON.stringify({ command, description: "test" }) } }] }) + sse({}, "tool_calls"));
         } else if (userText.includes("remember")) {
           res.write(sse({ role: "assistant", content: null, tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: `${MEMORY_SERVER}_remember`, arguments: JSON.stringify({ subject: "package manager", claim: "uses pnpm", pinned: true }) } }] }) + sse({}, "tool_calls"));
         } else {
@@ -159,6 +162,42 @@ describe.skipIf(!enabled)("the real engine", () => {
       scopes: [{ kind: "workspace", workspaceId: "ws_1" }],
     });
   }, 60_000);
+
+  /**
+   * The allowlist (ticket 028) and the shell baseline both allow a command by
+   * prefix, so they are only safe if the engine judges each command in a chain
+   * on its own, rather than matching the whole string against `git status *`.
+   */
+  const bashUnder = async (command: string): Promise<string> => {
+    const dir = encodeURIComponent(repo);
+    const permission = [
+      { permission: "bash", pattern: "*", action: "deny" },
+      { permission: "bash", pattern: "git status *", action: "allow" },
+    ];
+    const s = await call(`/session?directory=${dir}`, { method: "POST", body: JSON.stringify({ title: "t", permission }) });
+    await call(`/session/${s.id}/message?directory=${dir}`, {
+      method: "POST",
+      body: JSON.stringify({ parts: [{ type: "text", text: `run:${command}` }], model: { providerID: "fake", modelID: "m" } }),
+    });
+    // The tool's own record — status and output — is in the transcript.
+    const transcript: { parts: { type: string; tool?: string; state?: unknown }[] }[] = await call(`/session/${s.id}/message?directory=${dir}`);
+    return JSON.stringify(transcript.flatMap((m) => m.parts).filter((p) => p.type === "tool").map((p) => p.state));
+  };
+
+  it("runs a command its prefix allows", async () => {
+    const parts = await bashUnder("git status");
+    expect(parts).toMatch(/On branch|No commits yet|nothing to commit/);
+  }, 60_000);
+
+  it("judges each command in a chain on its own, so an allowed prefix cannot carry another command", async () => {
+    const { existsSync: exists } = await import("node:fs");
+    for (const chain of ["git status; touch pwned1.txt", "git status && touch pwned2.txt", "git status | touch pwned3.txt", "git status $(touch pwned4.txt)"]) {
+      const record = await bashUnder(chain);
+      // Refused, not merely failed: the engine says why.
+      expect(record, chain).toMatch(/denied|rejected|not allowed|permission/i);
+    }
+    for (const n of [1, 2, 3, 4]) expect(exists(join(repo, `pwned${n}.txt`)), `pwned${n}.txt`).toBe(false);
+  }, 120_000);
 
   it("replaces an MCP server registered again under the same name", async () => {
     const { dir } = await session();

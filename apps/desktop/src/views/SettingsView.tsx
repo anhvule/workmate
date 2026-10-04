@@ -80,6 +80,48 @@ function Access({ workspaceId }: { workspaceId: string }): React.JSX.Element {
   );
 }
 
+function Allowed({ workspaceId }: { workspaceId: string }): React.JSX.Element {
+  const list = useLoad(() => api.allowances.list(workspaceId), [workspaceId]);
+  const [kind, setKind] = useState<"bash" | "mcp">("bash");
+  const [value, setValue] = useState("");
+  const add = useAction(async () => {
+    await api.allowances.add(workspaceId, kind, value);
+    setValue("");
+    list.reload();
+  });
+  const remove = useAction(async (id: string) => {
+    await api.allowances.remove(id);
+    list.reload();
+  });
+  return (
+    <section aria-label="Always allowed" className="space-y-2">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Always allowed in this project</h2>
+      <p className="text-sm text-muted">Commands and MCP servers that run without asking, here only. Anything that could push, publish, delete outside the project or run arbitrary code is refused when you add it, and <code className="font-mono">git push</code> asks no matter what. Scheduled automations can use these too.</p>
+      <Card>
+        <ul className="divide-y divide-edge">
+          {list.data?.length === 0 && <li className="px-4 py-2.5 text-sm text-muted">Nothing yet. Everything asks first.</li>}
+          {list.data?.map((a) => (
+            <li key={a.id} className="flex items-center gap-3 px-4 py-2.5">
+              <Chip tone={a.kind === "bash" ? "neutral" : "accent"}>{a.kind === "bash" ? "command" : "MCP"}</Chip>
+              <code className="min-w-0 flex-1 truncate font-mono text-xs">{a.value}</code>
+              <Button small variant="ghost" onClick={() => void remove.run(a.id)}>Revoke</Button>
+            </li>
+          ))}
+        </ul>
+      </Card>
+      <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void add.run(); }}>
+        <Select aria-label="Kind" value={kind} onChange={(e) => setKind(e.target.value as "bash" | "mcp")} className="w-36">
+          <option value="bash">Command</option>
+          <option value="mcp">MCP server</option>
+        </Select>
+        <Input aria-label="Command or server" className="font-mono" value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === "bash" ? "pnpm test" : "github"} spellCheck={false} />
+        <Button type="submit" disabled={add.pending || !value.trim()}>Allow</Button>
+      </form>
+      <ErrorText>{add.error ?? remove.error ?? list.error}</ErrorText>
+    </section>
+  );
+}
+
 function ServerForm({ workspaceId, onAdded }: { workspaceId: string; onAdded: () => void }): React.JSX.Element {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"remote" | "local">("remote");
@@ -156,6 +198,7 @@ export function SettingsView({ workspaceId }: { workspaceId: string }): React.JS
       </section>
       <Keys workspaceId={workspaceId} />
       <Access workspaceId={workspaceId} />
+      <Allowed workspaceId={workspaceId} />
       <Mcp workspaceId={workspaceId} />
       <section aria-label="Diagnostics" className="space-y-2">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Diagnostics</h2>

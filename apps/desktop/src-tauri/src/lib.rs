@@ -6,6 +6,7 @@
 //! takes that as a constraint from the first commit rather than a later fix
 //! (ticket 010).
 
+pub mod allowance;
 pub mod automation;
 pub mod credentials;
 pub mod cron;
@@ -432,6 +433,31 @@ fn run_reveal_worktree(app: tauri::AppHandle, workspace_id: String, run_id: Stri
     let opener = "xdg-open";
     std::process::Command::new(opener).arg(&path).spawn().map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn allowance_list(db: tauri::State<'_, db::Db>, workspace_id: String) -> Result<Vec<allowance::Allowance>, String> {
+    allowance::list(&db, &workspace_id).map_err(|e| e.to_string())
+}
+
+/// Always allow a command prefix or an MCP server in one project. Screened in
+/// Rust: a refusal comes back with its reason, and nothing is stored.
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn allowance_add(
+    db: tauri::State<'_, db::Db>,
+    workspace_id: String,
+    kind: allowance::Kind,
+    value: String,
+) -> Result<allowance::Allowance, String> {
+    allowance::add(&db, &workspace_id, kind, &value).map_err(|e| e.to_string())
+}
+
+#[expect(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn allowance_remove(db: tauri::State<'_, db::Db>, id: String) -> Result<(), String> {
+    allowance::remove(&db, &id).map_err(|e| e.to_string())
 }
 
 /// Show workmate's logs in the file manager. Local only: nothing is sent anywhere.
@@ -903,6 +929,9 @@ pub fn run() {
             run_get,
             run_reveal_worktree,
             logs_reveal,
+            allowance_list,
+            allowance_add,
+            allowance_remove,
             credential_set,
             credential_delete,
             credential_status,
