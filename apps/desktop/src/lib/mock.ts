@@ -201,6 +201,7 @@ export const mockBridge = (opts: MockOptions = {}): { invoke: Invoke; listen: Li
     const ok = (v: unknown): R => v as R;
     switch (cmd) {
       case "start_runtime": return ok("http://127.0.0.1:4096");
+      case "logs_reveal": return ok("/Users/you/Library/Logs/dev.workmate.app");
       case "engine_info": return ok({ pinnedVersion: "1.18.32", sidecarPresent: true });
       case "sidecar_command": return ok(await sidecar(args["name"], args["args"] ?? {}));
       case "workspace_list": return ok(workspaces);

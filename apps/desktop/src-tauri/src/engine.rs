@@ -191,6 +191,13 @@ impl Engine {
             }
         };
 
+        // Keep reading both pipes for the engine's whole life. A pipe nobody
+        // reads fills after ~64 KiB and the engine blocks on its next log line.
+        crate::logs::drain("engine", reader);
+        if let Some(err) = child.stderr.take() {
+            crate::logs::drain("engine", err);
+        }
+
         Ok(Self {
             child,
             address: EngineAddress { base_url, password },

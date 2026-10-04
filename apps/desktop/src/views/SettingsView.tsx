@@ -146,6 +146,7 @@ export function SettingsView({ workspaceId }: { workspaceId: string }): React.JS
   const [tick, setTick] = useState(0);
   const model = useLoad(() => api.models.getDefault(), [tick]);
   const info = useLoad(() => api.engineInfo(), []);
+  const reveal = useAction(async () => api.revealLogs());
   return (
     <div className="mx-auto max-w-3xl space-y-8 p-5">
       <section aria-label="Default model" className="space-y-2">
@@ -156,6 +157,12 @@ export function SettingsView({ workspaceId }: { workspaceId: string }): React.JS
       <Keys workspaceId={workspaceId} />
       <Access workspaceId={workspaceId} />
       <Mcp workspaceId={workspaceId} />
+      <section aria-label="Diagnostics" className="space-y-2">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Diagnostics</h2>
+        <p className="text-sm text-muted">workmate sends nothing about you or your work anywhere. When something goes wrong, its logs — and the engine's — are kept on this computer.</p>
+        <Button small onClick={() => void reveal.run()}>Show logs</Button>
+        <ErrorText>{reveal.error}</ErrorText>
+      </section>
       <section aria-label="About" className="space-y-1 text-xs text-muted">
         {info.data && <p>workmate runs OpenCode {info.data.pinnedVersion}, bundled with the app{info.data.sidecarPresent ? "" : " (engine missing from this build)"}.</p>}
         {info.data && !info.data.sidecarPresent && <Banner tone="danger">The bundled engine is missing, so nothing can run. Reinstall workmate.</Banner>}

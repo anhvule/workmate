@@ -300,7 +300,7 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<i64> {
     for m in LADDER.iter().filter(|m| m.version > start) {
         // Named in the log because the first question on a failed upgrade is
         // always "which step?", and by then the user is not at a debugger.
-        eprintln!("workmate: applying migration {} ({})", m.version, m.name);
+        crate::logs::warn(&format!("applying migration {} ({})", m.version, m.name));
         let tx = conn.transaction()?;
         apply(&tx, m)?;
         tx.commit()?;

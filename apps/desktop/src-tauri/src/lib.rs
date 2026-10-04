@@ -16,6 +16,7 @@ pub mod host;
 pub mod ids;
 pub mod mcp;
 pub mod memory;
+pub mod logs;
 pub mod migrations;
 pub mod ops;
 pub mod packs;
@@ -361,7 +362,7 @@ fn spawn_scheduler(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         use tauri::Manager as _;
         if let Err(e) = automation::recover(&app.state::<db::Db>()) {
-            eprintln!("automations: could not recover interrupted fires: {e}");
+            logs::warn(&format!("automations: could not recover interrupted fires: {e}"));
         }
         loop {
             std::thread::sleep(SCHEDULER_TICK);
@@ -378,7 +379,7 @@ fn spawn_scheduler(app: tauri::AppHandle) {
                 out["runId"].as_str().map(str::to_owned).ok_or_else(|| "the sidecar did not return a run id".to_owned())
             };
             if let Err(e) = automation::tick(&app.state::<db::Db>(), db::now_ms(), &start) {
-                eprintln!("automations: tick failed: {e}");
+                logs::warn(&format!("automations: tick failed: {e}"));
             }
         }
     });
@@ -431,6 +432,20 @@ fn run_reveal_worktree(app: tauri::AppHandle, workspace_id: String, run_id: Stri
     let opener = "xdg-open";
     std::process::Command::new(opener).arg(&path).spawn().map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// Show workmate's logs in the file manager. Local only: nothing is sent anywhere.
+#[tauri::command]
+fn logs_reveal() -> Result<String, String> {
+    let dir = logs::dir().ok_or("logging is not set up")?;
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let opener = "xdg-open";
+    std::process::Command::new(opener).arg(dir).spawn().map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().into_owned())
 }
 
 /// Where a credential applies, as the webview names it.
@@ -838,6 +853,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             use tauri::Manager as _;
+            if let Ok(logs) = app.path().app_log_dir() {
+                logs::init(&logs);
+            }
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             app.manage(db::Db::open(&dir.join("workmate.sqlite3"))?);
@@ -884,6 +902,7 @@ pub fn run() {
             run_list,
             run_get,
             run_reveal_worktree,
+            logs_reveal,
             credential_set,
             credential_delete,
             credential_status,

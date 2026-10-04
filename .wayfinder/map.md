@@ -200,15 +200,21 @@ creative work · `superpowers:test-driven-development` · `grilling` and
   dmg, so no first-run download; no updater in v1. Packaging found two real bugs
   (globs flattening the packs; the engine outliving a Cmd-Q) now fixed and tested.
   Signing, notarization and CI are written but unexecuted until the first tag.
+- [Telemetry and error reporting](tickets/030-telemetry-and-diagnostics.md) —
+  none, deliberately: nothing about a user's work leaves the machine. Local
+  rotating logs instead, which fixed a real hang: the engine's pipes were not
+  being drained after startup.
 
 ## Not yet specified
 
-- **Provider credentials UX** — how 12+ providers are added and presented, and
-  what a user does when a model they picked has no key. The *scoping* half of this
-  has graduated to [How credentials are scoped](tickets/009-credential-scoping.md).
-- **Telemetry and error reporting** — or a deliberate decision to ship without any.
-- **Cross-platform** — Windows and Linux. The binary matrix is decided, so what
-  remains is CI runners and platform-specific keychain and path handling.
+- **Cross-platform** — Windows and Linux. The binary matrix is decided and the
+  engine is already isolated through XDG variables, which Linux honours as-is;
+  what remains is CI runners, the Windows keychain backend in practice, path
+  handling, and an opener for "reveal". Nothing has been run on either.
+
+<!-- Graduated since charting: provider credentials UX (built in the shell, 029,
+     and first run, 022 — keys asked for in place, write-only, keychain-backed)
+     and telemetry (030: none, with local logs). -->
 
 <!-- Cron automations, starter packs, MCP config, packaging and first-run all
      graduated into tickets 018-022 once the domain model fixed their vocabulary. -->

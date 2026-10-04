@@ -19,6 +19,7 @@ const cmd = <R = unknown>(name: string, args: Record<string, unknown> = {}): Pro
 
 export const api = {
   boot: () => invoke<string>("start_runtime"),
+  revealLogs: () => invoke<string>("logs_reveal"),
   engineInfo: () => invoke<{ pinnedVersion: string; sidecarPresent: boolean }>("engine_info"),
 
   workspaces: {

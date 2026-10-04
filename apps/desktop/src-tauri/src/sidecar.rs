@@ -155,7 +155,7 @@ pub fn serve(line: &str, hooks: &Hooks, pending: &Pending) -> Option<String> {
             None
         }
         "fault" => {
-            eprintln!("sidecar fault: {}", value.get("message").and_then(Value::as_str).unwrap_or("?"));
+            crate::logs::warn(&format!("sidecar fault: {}", value.get("message").and_then(Value::as_str).unwrap_or("?")));
             None
         }
         _ => None,
@@ -221,8 +221,13 @@ impl Sidecar {
         let mut child = Command::new(binary)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            // Piped, not inherited: in a bundled app stderr goes nowhere, and
+            // the sidecar's account of a failure belongs in a log you can open.
+            .stderr(Stdio::piped())
             .spawn()?;
+        if let Some(err) = child.stderr.take() {
+            crate::logs::drain("sidecar", err);
+        }
 
         let mut stdin = child.stdin.take().ok_or(SidecarError::ExitedDuringStartup)?;
         stdin.write_all(hello(address)?.as_bytes())?;

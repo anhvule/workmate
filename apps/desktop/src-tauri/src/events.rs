@@ -238,7 +238,7 @@ fn run(address: &EngineAddress, sink: &Sink, backoff: Backoff, stop: &AtomicBool
                     }
                 }
             }
-            Err(e) => eprintln!("events: connect failed: {e}"),
+            Err(e) => crate::logs::warn(&format!("events: connect failed: {e}")),
         }
         sleep_unless_stopped(delay, stop);
         delay = (delay * 2).min(backoff.max);
