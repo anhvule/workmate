@@ -207,10 +207,12 @@ creative work · `superpowers:test-driven-development` · `grilling` and
 
 ## Not yet specified
 
-- **Cross-platform** — Windows and Linux. The binary matrix is decided and the
-  engine is already isolated through XDG variables, which Linux honours as-is;
-  what remains is CI runners, the Windows keychain backend in practice, path
-  handling, and an opener for "reveal". Nothing has been run on either.
+- **Cross-platform** — Windows and Linux. *Linux now has evidence:* CI runs the
+  full gate and the real-engine end-to-end test on `ubuntu-24.04`, and it passes
+  (the one failure it found was a test harness reading a request in one segment).
+  It is still not a shipped target: no `.deb`/AppImage bundle, no Secret Service
+  check on a real desktop, no "reveal" tested. *Windows has nothing yet:* no
+  runner, and the keychain backend, paths and shell assumptions are unverified.
 
 <!-- Graduated since charting: provider credentials UX (built in the shell, 029,
      and first run, 022 — keys asked for in place, write-only, keychain-backed)
