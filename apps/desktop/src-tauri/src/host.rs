@@ -221,9 +221,24 @@ mod tests {
         let got = Arc::clone(&seen);
         std::thread::spawn(move || {
             let (mut c, _) = listener.accept().unwrap();
+            // Read the whole request: headers, then Content-Length bytes. One
+            // `read` is not a request — on Linux the body arrives separately.
+            let mut req = Vec::new();
             let mut buf = [0u8; 4096];
-            let n = c.read(&mut buf).unwrap();
-            *got.lock().unwrap() = String::from_utf8_lossy(&buf[..n]).into_owned();
+            loop {
+                let n = c.read(&mut buf).unwrap();
+                if n == 0 { break; }
+                req.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&req).into_owned();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let len = text[..end]
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                        .unwrap_or(0);
+                    if req.len() >= end + 4 + len { break; }
+                }
+            }
+            *got.lock().unwrap() = String::from_utf8_lossy(&req).into_owned();
             let _ = c.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntrue");
         });
 
